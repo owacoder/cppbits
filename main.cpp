@@ -20,7 +20,7 @@ int main(int, char **)
     typedef simd_vector<unsigned, 8, signed> mvector;
     typedef simd_vector<unsigned, 8, unsigned> muvector;
     typedef simd_vector<unsigned, 16, unsigned> mu16vector;
-    typedef simd_vector<unsigned, 32, float> mufloatvector;
+    typedef simd_vector<uint64_t, 64, double> mufloatvector;
 
 #if 0
     std::cout << "element mask: " << mvector::scalar_mask() << "\n";
@@ -51,7 +51,7 @@ int main(int, char **)
 
     vec.add(vec2, vec.math_keeplow);
     mu16vector uvec;// = vec.cast<16, unsigned>();
-    mufloatvector fvec = vec.cast<32, float>();
+    mufloatvector fvec = vec.cast<uint64_t, 64, double>();
     //vec = vec.fill_if_nonzero();
 
     for (unsigned i = 0; i < mvector::max_elements(); ++i)

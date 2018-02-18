@@ -112,6 +112,13 @@ public:
     simd_vector<T, element_size, NewType> cast() const {return simd_vector<T, element_size, NewType>::make_vector(data_);}
 
     /*
+     * Returns a new representation of the vector, casted to a different type with different element size, with a different underlying type.
+     * The data is not modified.
+     */
+    template<typename UnderlyingType, unsigned int element_size, typename NewType>
+    simd_vector<UnderlyingType, element_size, NewType> cast() const {return simd_vector<UnderlyingType, element_size, NewType>::make_vector(data_);}
+
+    /*
      * Returns a representation of a vector with specified value assigned to the entire vector
      */
     constexpr static type make_vector(T value) {return type(value);}
@@ -332,6 +339,7 @@ public:
     /*
      * Computes the average of each element of `this` and `vec` as `((element of this) + (element of vec) + 1)/2`
      * TODO: if element_bits == number of bits in T, undefined behavior results
+     * TODO: support floating-point values
      */
     type avg(const simd_vector &vec) const
     {
@@ -344,6 +352,7 @@ public:
     /*
      * Shifts each element of `this` to the left by `amount` and returns the resulting vector
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
+     * TODO: support floating-point values
      */
     constexpr type operator<<(unsigned int amount) const
     {
@@ -353,6 +362,7 @@ public:
     /*
      * Shifts each element of `this` to the left by `amount` (using specified shift type) and returns the resulting vector
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
+     * TODO: support floating-point values
      */
     constexpr type shl(unsigned int amount, shift_type) const
     {
@@ -362,6 +372,7 @@ public:
     /*
      * Shifts each element of `this` to the right by `amount` (using shift_natural behavior) and returns the resulting vector
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
+     * TODO: support floating-point values
      */
     constexpr type operator>>(unsigned int amount) const
     {
@@ -371,6 +382,7 @@ public:
     /*
      * Shifts each element of `this` to the right by `amount` (using specified shift type) and returns the resulting vector
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
+     * TODO: support floating-point values
      */
     type shr(unsigned int amount, shift_type shift) const
     {
@@ -401,11 +413,15 @@ public:
     /*
      * Negates elements of `this` and returns the resulting vector
      * Note that this function returns the value unmodified if EffectiveType is not a signed type
-     * TODO: support floating-point values
      */
     type negate() const
     {
-        if (elements_are_signed)
+        if (elements_are_floats)
+        {
+            constexpr T neg_mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits, elements);
+            return {data_ ^ neg_mask};
+        }
+        else if (elements_are_signed)
         {
             constexpr T neg_mask = expand_mask(element_mask >> 1, element_bits, elements);
             constexpr T add_mask = expand_mask(1, element_bits, elements);
@@ -417,11 +433,15 @@ public:
     /*
      * Computes the absolute value of elements of `this` and returns the resulting vector
      * Note that this function returns the value unmodified if EffectiveType is not a signed type
-     * TODO: support floating-point values
      */
     type abs() const
     {
-        if (elements_are_signed)
+        if (elements_are_floats)
+        {
+            constexpr T neg_mask = expand_mask(element_mask >> 1, element_bits, elements);
+            return {data_ & neg_mask};
+        }
+        else if (elements_are_signed)
         {
             constexpr T abs_mask = expand_mask(element_mask >> 1, element_bits, elements);
             const T neg = (data_ & abs_mask) >> (element_bits - 1);
@@ -436,6 +456,49 @@ public:
     type fill_if_nonzero() const
     {
         return type(fill_elements_if_nonzero(data_, element_bits, element_bits));
+    }
+
+    /*
+     * Returns true if vector has at least one element equal to zero, false otherwise
+     * See <http://graphics.stanford.edu/~seander/bithacks.html#HasLessInWord>
+     * This is a rewrite of hasless(u, 1)
+     */
+    constexpr bool has_zero_element() const
+    {
+        return element_bits == 1? data_ != mask: ((data_ - expand_mask(1, element_bits, elements)) &
+                (~data_ & expand_mask(element_mask ^ (element_mask >> 1), element_bits, elements))) != 0;
+    }
+
+    /*
+     * Returns number of zero elements in vector
+     * See <http://graphics.stanford.edu/~seander/bithacks.html#HasLessInWord>
+     * This is a rewrite of countless(u, 1)
+     * TODO: doesn't work properly with small element sizes
+     */
+    unsigned int count_zero_elements() const
+    {
+        constexpr T test_mask = expand_mask(element_mask >> 1, element_bits, elements);
+        return (((test_mask - (data_ & test_mask)) & ~data_ & ~test_mask) >> (element_bits - 1)) % element_mask;
+    }
+
+    /*
+     * Returns true if vector has at least one element equal to `v`, false otherwise
+     * See <http://graphics.stanford.edu/~seander/bithacks.html#HasLessInWord>
+     * This is a rewrite of hasless(u, 1)
+     */
+    constexpr bool has_equal_element(EffectiveType v) const
+    {
+        return (*this ^ make_broadcast(v)).has_zero_element();
+    }
+
+    /*
+     * Returns number of zero elements in vector
+     * See <http://graphics.stanford.edu/~seander/bithacks.html#HasLessInWord>
+     * This is a rewrite of countless(u, 1)
+     */
+    constexpr unsigned int count_equal_elements(EffectiveType v) const
+    {
+        return (*this ^ make_broadcast(v)).count_zero_elements();
     }
 
     /*

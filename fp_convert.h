@@ -22,8 +22,8 @@
  * IN THE SOFTWARE.
  */
 
-#ifndef CPPDATALIB_FP_CONVERT_H
-#define CPPDATALIB_FP_CONVERT_H
+#ifndef CPPBITS_FP_CONVERT_H
+#define CPPBITS_FP_CONVERT_H
 
 #include <cfloat>
 #include <cmath>
@@ -74,7 +74,7 @@ inline float float_from_ieee_754_half(uint16_t f)
         if (mantissa == 0) // +/- Infinity
             result = std::numeric_limits<float>::infinity();
         else // qNaN, sNaN
-            return f >> sign_offset?
+            result = (f >> (exponent_offset - 1)) & 1?
                 std::numeric_limits<float>::quiet_NaN():
                 std::numeric_limits<float>::signaling_NaN();
     }
@@ -155,7 +155,7 @@ inline float float_from_ieee_754(uint32_t f)
         if (mantissa == 0) // +/- Infinity
             result = std::numeric_limits<float>::infinity();
         else // qNaN, sNaN
-            return f >> sign_offset?
+            result = (f >> (exponent_offset - 1)) & 1?
                 std::numeric_limits<float>::quiet_NaN():
                 std::numeric_limits<float>::signaling_NaN();
     }
@@ -260,7 +260,7 @@ inline double double_from_ieee_754(uint64_t f)
         if (mantissa == 0) // +/- Infinity
             result = std::numeric_limits<double>::infinity();
         else // qNaN, sNaN
-            return f >> sign_offset?
+            result = (f >> (exponent_offset - 1)) & 1?
                 std::numeric_limits<double>::quiet_NaN():
                 std::numeric_limits<double>::signaling_NaN();
     }
@@ -321,5 +321,5 @@ inline uint64_t double_to_ieee_754(double d)
     return result;
 }
 
-#endif // CPPDATALIB_FP_CONVERT_H
+#endif // CPPBITS_FP_CONVERT_H
 

@@ -27,8 +27,9 @@
 
 #include "../environment.h"
 
-#if CPPBITS_GCC && defined CPPBITS_X86
+#if defined CPPBITS_GCC && (defined CPPBITS_X86 || defined CPPBITS_X86_64)
 #include <x86intrin.h>
+#include "generic_simd.h"
 
 template<typename T, typename EffectiveType>
 class simd_vector<T, 8, EffectiveType>
