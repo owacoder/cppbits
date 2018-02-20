@@ -27,29 +27,42 @@
 
 #include "../environment.h"
 
-#if defined CPPBITS_GCC && (defined CPPBITS_X86 || defined CPPBITS_X86_64)
+#if defined CPPBITS_GCC && (defined CPPBITS_X86 || defined CPPBITS_X86_64) && defined CPPBITS_SSE
 #include <x86intrin.h>
 #include "generic_simd.h"
 
 template<typename T, typename EffectiveType>
-class simd_vector<T, 8, EffectiveType>
+class simd_vector<T, 32, EffectiveType>
 {
-    static constexpr unsigned int element_bits = 8;
+    static constexpr unsigned int element_bits = 32;
     static constexpr unsigned int vector_digits = 128;
 
     static_assert(std::is_unsigned<T>::value, "T must be an unsigned integral type");
+    static_assert(element_bits, "Number of bits per element must be greater than zero");
 
     static constexpr bool elements_are_signed = std::is_signed<EffectiveType>::value;
+    static constexpr bool elements_are_floats = std::is_floating_point<EffectiveType>::value;
     typedef simd_vector<T, element_bits, EffectiveType> type;
-    typedef T value_type;
+    typedef uint64_t value_type;
     static constexpr uint64_t ones = -1;
     static constexpr unsigned int elements = vector_digits / element_bits;
-    static constexpr uint64_t mask = ones;
-    static constexpr uint64_t element_mask = ones >> ((vector_digits / 2) - element_bits);
+    static constexpr T element_mask = ones >> (64 - element_bits);
 
+    static_assert(!elements_are_floats || (element_bits == 32 || element_bits == 64), "Floating-point element size must be 32 or 64 bits");
     static_assert(elements, "Element size is too large for specified type");
+    static_assert(elements_are_floats || std::numeric_limits<EffectiveType>::digits + elements_are_signed >= element_bits, "Element size is too large for specified effective type `EffectiveType`");
 
     constexpr explicit simd_vector(__m128i value) : data_(value) {}
+    constexpr explicit simd_vector(__m128 value) : data_((__m128i) value) {}
+
+    constexpr static T make_t_from_effective(EffectiveType v)
+    {
+        return elements_are_floats? element_bits == 32? T(float_cast_to_ieee_754(v)): T(double_cast_to_ieee_754(v)): T(v);
+    }
+    constexpr static EffectiveType make_effective_from_t(T v)
+    {
+        return elements_are_floats? element_bits == 32? EffectiveType(float_cast_from_ieee_754(v)): EffectiveType(double_cast_from_ieee_754(v)): EffectiveType(v);
+    }
 
 public:
     enum broadcast_type
@@ -66,31 +79,101 @@ public:
         math_keeplow, /* Rollover arithmetic, keep low part of result */
     };
 
+    enum shift_type
+    {
+        shift_natural, /* Either logical or arithmetic, depending on the effective element type */
+        shift_logical, /* Logical shift shifts in zeros */
+        shift_arithmetic, /* Arithmetic shift copies the sign bit in from the left, zeros from the right */
+    };
+
+    enum compare_type
+    {
+        compare_less, /* Compare `a < b` */
+        compare_lessequal, /* Compare `a <= b` */
+        compare_greater, /* Compare `a > b` */
+        compare_greaterequal, /* Compare `a >= b` */
+        compare_equal, /* Compare `a == b` */
+        compare_nequal /* Compare `a != b` */
+    };
+
+    /*
+     * Default constructor zeros the vector
+     */
     constexpr simd_vector() : data_{} {}
 
+    /*
+     * Returns a new representation of the vector, casted to a different type.
+     * The data is not modified.
+     */
     template<typename NewType>
     constexpr simd_vector<T, element_bits, NewType> cast() const {return simd_vector<T, element_bits, NewType>::make_vector(data_);}
 
+    /*
+     * Returns a new representation of the vector, casted to a different type with different element size.
+     * The data is not modified.
+     */
     template<unsigned int element_size, typename NewType>
     simd_vector<T, element_size, NewType> cast() const {return simd_vector<T, element_size, NewType>::make_vector(data_);}
 
+    /*
+     * Returns a new representation of the vector, casted to a different type with different element size, with a different underlying type.
+     * The data is not modified.
+     */
+    template<typename UnderlyingType, unsigned int element_size, typename NewType>
+    simd_vector<UnderlyingType, element_size, NewType> cast() const {return simd_vector<UnderlyingType, element_size, NewType>::make_vector(data_);}
+
+    /*
+     * Returns a representation of a vector with specified value assigned to the entire vector
+     */
+
     constexpr static type make_vector(__m128i value) {return type(value);}
-    constexpr static type make_scalar(EffectiveType value) {return type(make_t_from_effective(value) & element_mask);}
+
+    /*
+     * Returns a representation of a vector with specified value assigned to element 0
+     */
+    static type make_scalar(EffectiveType value)
+    {
+        alignas(4) uint32_t temp = make_t_from_effective(value);
+        return type(_mm_load_ss((float *) &temp));
+    }
+
+    /*
+     * Returns a representation of a vector with specified value assigned to every element in the vector
+     */
     constexpr static type make_broadcast(EffectiveType value) {return type(expand_mask(make_t_from_effective(value) & element_mask, element_bits));}
 
+    /*
+     * Sets this vector to a representation of a vector with specified value assigned to the entire vector
+     */
     type &vector(__m128i value) {return *this = make_vector(value);}
+
+    /*
+     * Sets this vector to a representation of a vector with specified value assigned to element 0
+     * All elements other than element 0 are zeroed.
+     */
     type &scalar(EffectiveType value) {return *this = make_scalar(value);}
+
+    /*
+     * Sets this vector to a representation of a vector with specified value assigned to every element
+     */
     type &broadcast(EffectiveType value) {return *this = make_broadcast(value);}
 
+    /*
+     * Returns the internal representation of the entire vector
+     */
     constexpr __m128i vector() const {return data_;}
-    EffectiveType scalar() const {return get(0);}
+
+    /*
+     * Returns the value of element 0
+     */
+    EffectiveType scalar() const {return get<0>();}
 
     /*
      * Logical NOT's the entire vector and returns it
      */
-    constexpr type operator~() const
+    type operator~() const
     {
-        return type(_mm_xor_si128(data_, expand_mask(element_mask, element_bits)));
+        return type(_mm_xor_ps((__m128) data_, (__m128) expand_mask(element_mask, element_bits)));
     }
 
     /*
@@ -98,7 +181,7 @@ public:
      */
     constexpr type operator|(const simd_vector &vec) const
     {
-        return type(_mm_or_si128(data_, vec.vector()));
+        return type(_mm_or_ps((__m128) data_, (__m128) vec.vector()));
     }
 
     /*
@@ -106,15 +189,15 @@ public:
      */
     constexpr type operator&(const simd_vector &vec) const
     {
-        return type(_mm_and_si128(data_, vec.vector()));
+        return type(_mm_and_ps((__m128) data_, (__m128) vec.vector()));
     }
 
     /*
-     * Logical AND NOT's the entire vector with `vec` and returns it
+     * Logical ANDT's the entire vector with negated `vec` and returns it
      */
-    constexpr type andnot(const simd_vector &vec) const
+    constexpr type and_not(const simd_vector &vec) const
     {
-        return type(_mm_andnot_si128(data_, vec.vector()));
+        return type(_mm_andnot_ps((__m128) data_, (__m128) vec.vector()));
     }
 
     /*
@@ -122,237 +205,660 @@ public:
      */
     constexpr type operator^(const simd_vector &vec) const
     {
-        return type(_mm_xor_si128(data_, vec.vector()));
+        return type(_mm_xor_ps((__m128) data_, (__m128) vec.vector()));
     }
 
     /*
-     * Adds elements of `vec` to `this` (using rollover addition) and stores the result
+     * Adds all elements of `this` and returns the resulting sum
      */
-    constexpr type operator+(const simd_vector &vec) const
+    constexpr EffectiveType horizontal_sum() const
     {
-        return type(_mm_add_epi8(data_, vec.vector()));
+        CPPBITS_ERROR("Horizontal sum not implemented for x86 32-bit SIMD vectors yet");
     }
 
     /*
-     * Adds elements of `vec` to `this` (using specified math method) and stores the result
+     * Adds elements of `vec` to `this` (using rollover addition) and returns the result
      */
-    type &add(const simd_vector &vec, math_type math)
+    type operator+(const simd_vector &vec) const {return add(vec, math_keeplow);}
+
+    /*
+     * Adds elements of `vec` to `this` (using specified math method) and returns the result
+     */
+    type add(const simd_vector &vec, math_type math) const
     {
-        switch (math) {
-            default: /* Rollover arithmetic, math_keeplow */
-                data_ = _mm_add_epi8(data_, vec.vector());
-                break;
-            case math_saturate:
-                if (elements_are_signed)
-                    data_ = _mm_adds_epi8(data_, vec.vector());
-                else
-                    data_ = _mm_adds_epu8(data_, vec.vector());
-                break;
-            case math_keephigh: /* TODO: not yet verified as there is no builtin to keep the high part of an addition */
-                __m128i temp = _mm_add_epi8(data_, vec.vector());
-                data_ = _mm_cmpgt_epi8(data_, temp);
-                if (!elements_are_signed)
-                    data_ = _mm_abs_epi8(data_);
-                break;
+        if (elements_are_floats)
+            return type(_mm_add_ps((__m128) data_, (__m128) vec.vector()));
+        else
+        {
+            switch (math) {
+                default: /* Rollover arithmetic, math_keeplow */
+#ifdef CPPBITS_SSE2
+                    return type(_mm_add_epi32(data_, vec.vector()));
+#else
+                {
+                    constexpr uint64_t add_mask = expand_small_mask(element_mask >> 1, element_bits, 64 / element_bits);
+                    alignas(16) uint64_t store[4];
+
+                    _mm_store_ps((float *) store, (__m128) data_);
+                    _mm_store_ps((float *) (store + 2), (__m128) vec.vector());
+
+                    store[0] = ((store[0] & add_mask) + (store[2] & add_mask)) ^ ((store[0] ^ store[2]) & ~add_mask);
+                    store[1] = ((store[1] & add_mask) + (store[3] & add_mask)) ^ ((store[1] ^ store[3]) & ~add_mask);
+
+                    return type(_mm_load_ps((float *) store));
+                }
+#endif
+                case math_saturate:
+                    if (elements_are_signed)
+                    {
+                        CPPBITS_ERROR("Signed saturation not implemented for x86 32-bit SIMD vectors yet");
+                    }
+                    else
+                    {
+                        CPPBITS_ERROR("Unsigned saturation not implemented for x86 32-bit SIMD vectors yet");
+                    }
+                case math_keephigh: /* TODO: not yet verified as there is no builtin to keep the high part of an addition */
+                {
+                    CPPBITS_ERROR("Addition using math_keephigh not implemented for x86 32-bit SIMD vectors yet");
+                }
+            }
         }
-        return *this;
     }
 
     /*
-     * Subtracts elements of `vec` to `this` (using rollover subtraction) and stores the result
+     * Subtracts elements of `vec` to `this` (using rollover subtraction) and returns the result
      */
-    constexpr type operator-(const simd_vector &vec) const
+    type operator-(const simd_vector &vec) const {return sub(vec, math_keeplow);}
+
+    /*
+     * Subtracts elements of `vec` from `this` (using specified math method) and returns the result
+     */
+    type sub(const simd_vector &vec, math_type math) const
     {
-        return type(_mm_sub_epi8(data_, vec.vector()));
+        if (elements_are_floats)
+            return type(_mm_sub_ps((__m128) data_, (__m128) vec.vector()));
+        else
+        {
+            switch (math) {
+                default: /* Rollover arithmetic, math_keeplow */
+#ifdef CPPBITS_SSE2
+                    return type(_mm_sub_epi32(data_, vec.vector()));
+#else
+                {
+                    constexpr uint64_t sub_mask = expand_small_mask(element_mask >> 1, element_bits, 64 / element_bits);
+                    alignas(16) uint64_t store[4];
+
+                    _mm_store_ps((float *) store, (__m128) data_);
+                    _mm_store_ps((float *) (store + 2), (__m128) vec.vector());
+
+                    store[0] = ((store[0] | ~sub_mask) - (store[2] & sub_mask)) ^ ((store[0] ^ ~store[2]) & ~sub_mask);
+                    store[1] = ((store[1] | ~sub_mask) - (store[3] & sub_mask)) ^ ((store[1] ^ ~store[3]) & ~sub_mask);
+
+                    return type(_mm_load_ps((float *) store));
+                }
+#endif
+                case math_saturate:
+                    if (elements_are_signed)
+                    {
+                        CPPBITS_ERROR("Signed saturation not implemented for x86 32-bit SIMD vectors yet");
+                    }
+                    else
+                    {
+                        CPPBITS_ERROR("Unsigned saturation not implemented for x86 32-bit SIMD vectors yet");
+                    }
+                case math_keephigh: /* TODO: not yet verified as there is no builtin to keep the high part of an addition */
+                {
+                    CPPBITS_ERROR("Subtraction using math_keephigh not implemented for x86 32-bit SIMD vectors yet");
+                }
+            }
+        }
     }
 
-    type &sub(const simd_vector &vec, math_type math)
+    /*
+     * Multiplies elements of `vec` by `this` (using rollover multiplication) and returns the result
+     */
+    type operator*(const simd_vector &vec) const {return mul(vec, math_keeplow);}
+
+    /*
+     * Multiplies elements of `vec` by `this` (using specified math method) and returns the result
+     */
+    type mul(const simd_vector &vec, math_type math) const
     {
-        switch (math) {
-            default: /* Rollover arithmetic, math_keeplow */
-                data_ = _mm_sub_epi8(data_, vec.vector());
-                break;
-            case math_saturate:
-                if (elements_are_signed)
-                    data_ = _mm_subs_epi8(data_, vec.vector());
-                else
-                    data_ = _mm_subs_epu8(data_, vec.vector());
-                break;
-            case math_keephigh: /* TODO: not yet implemented as there is no builtin to keep the high part of an addition */
-                break;
-        }
-        return *this;
+        if (elements_are_floats)
+            return _mm_mul_ps((__m128) data_, (__m128) vec.vector());
+        else
+            CPPBITS_ERROR("Integral multiplication not implemented for x86 32-bit SIMD vectors yet");
+    }
+
+    /*
+     * Multiplies elements of `vec` by `this` (using specified math method) and returns the result
+     */
+    constexpr type mul_add(const simd_vector &vec, const simd_vector &add, math_type math) const
+    {
+        return mul(vec, math).add(add, math);
+    }
+
+    /*
+     * Divides elements of `this` by `vec` (using rollover division) and returns the result
+     */
+    type operator/(const simd_vector &vec) const {return div(vec, math_keeplow);}
+
+    /*
+     * Divides elements of `this` by `vec` (using specified math method) and returns the result
+     */
+    type div(const simd_vector &vec, math_type) const
+    {
+        if (elements_are_floats)
+            return _mm_div_ps((__m128) data_, (__m128) vec.vector());
+        else if (vec.has_zero_element())
+            CPPBITS_ERROR("Division by zero");
+        else
+            CPPBITS_ERROR("Integral division not implemented for x86 32-bit SIMD vectors yet");
+    }
+
+    /*
+     * Computes the average of each element of `this` and `vec` as `((element of this) + (element of vec) + 1)/2` for integral values,
+     * or `((element of this) + (element of vec))/2` for floating-point values
+     * TODO: if element_bits == number of bits in T, undefined behavior results
+     */
+    type avg(const simd_vector &) const
+    {
+        CPPBITS_ERROR("Element average not implemented for x86 32-bit SIMD vectors yet");
+    }
+
+    /*
+     * Shifts each element of `this` to the left by `amount` and returns the resulting vector
+     * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
+     * TODO: support floating-point values
+     */
+    constexpr type operator<<(unsigned int amount) const {return shl(amount, shift_natural);}
+
+    /*
+     * Shifts each element of `this` to the left by `amount` (using specified shift type) and returns the resulting vector
+     * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
+     * TODO: support floating-point values
+     */
+    constexpr type shl(unsigned int, shift_type) const
+    {
+        CPPBITS_ERROR("Left shift not implemented for x86 32-bit SIMD vectors yet");
+    }
+
+    /*
+     * Shifts each element of `this` to the right by `amount` (using shift_natural behavior) and returns the resulting vector
+     * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
+     * TODO: support floating-point values
+     */
+    constexpr type operator>>(unsigned int amount) const {return shr(amount, shift_natural);}
+
+    /*
+     * Shifts each element of `this` to the right by `amount` (using specified shift type) and returns the resulting vector
+     * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
+     * TODO: support floating-point values
+     */
+    type shr(unsigned int, shift_type) const
+    {
+        CPPBITS_ERROR("Right shift not implemented for x86 32-bit SIMD vectors yet");
+    }
+
+    /*
+     * Extracts MSB from each element and places them in the low bits of the result
+     * Each bit position in the result corresponds to the element position in the source vector
+     * (i.e. Element 0 MSB -> Bit 0, Element 1 MSB -> Bit 1, etc.)
+     */
+    unsigned int movmsk() const
+    {
+        CPPBITS_ERROR("Movmsk not implemented for x86 32-bit SIMD vectors yet");
     }
 
     /*
      * Negates elements of `this` and returns the resulting vector
      * Note that this function returns the value unmodified if EffectiveType is not a signed type
-     * TODO: not yet implemented
+     * TODO: are floating-point values supported properly?
      */
-    constexpr type negate() const
+    type negate() const
     {
-        return elements_are_signed? type(_mm_add_epi8(_mm_xor_si128(data_, expand_mask(element_mask, element_bits)), expand_mask(1, element_bits))): *this;
+        CPPBITS_ERROR("Negation not implemented for x86 32-bit SIMD vectors yet");
     }
 
     /*
      * Computes the absolute value of elements of `this` and returns the resulting vector
      * Note that this function returns the value unmodified if EffectiveType is not a signed type
+     * TODO: are floating-point values supported properly?
      */
-    constexpr type abs() const
+    type abs() const
     {
-        return elements_are_signed? type(_mm_abs_epi8(data_)): *this;
+        CPPBITS_ERROR("Absolute-value not implemented for x86 32-bit SIMD vectors yet");
     }
 
     /*
      * Sets each element of `this` to zero if the element is zero, or all ones otherwise, and returns the resulting vector
      */
-    constexpr type fill_if_nonzero() const
+    type fill_if_nonzero() const
     {
-        return ~type(_mm_cmpeq_epi8(data_, expand_mask(0, element_bits)));
+        return ~type(_mm_cmpeq_epi32(data_, _mm_setzero_si128()));
     }
 
     /*
-     * TODO: not yet implemented
+     * Returns true if vector has at least one element equal to zero, false otherwise
+     * See <http://graphics.stanford.edu/~seander/bithacks.html#HasLessInWord>
+     * This is a rewrite of hasless(u, 1)
      */
-    template<unsigned int lsb_pos, unsigned int length>
-    type &set()
+    constexpr bool has_zero_element() const
     {
-        data_ |= bitfield_member<T, lsb_pos, length>::bitfield_mask() & mask;
-        return *this;
+        CPPBITS_ERROR("Has-zero-element not implemented for x86 32-bit SIMD vectors yet");
     }
 
     /*
-     * TODO: not yet implemented
+     * Returns number of zero elements in vector
+     * See <http://graphics.stanford.edu/~seander/bithacks.html#HasLessInWord>
+     * This is a rewrite of countless(u, 1)
+     * TODO: doesn't work properly with small element sizes
+     */
+    unsigned int count_zero_elements() const
+    {
+        CPPBITS_ERROR("Count-zero-elements not implemented for x86 32-bit SIMD vectors yet");
+    }
+
+    /*
+     * Returns true if vector has at least one element equal to `v`, false otherwise
+     * See <http://graphics.stanford.edu/~seander/bithacks.html#HasLessInWord>
+     * This is a rewrite of hasless(u, 1)
+     */
+    constexpr bool has_equal_element(EffectiveType) const
+    {
+        CPPBITS_ERROR("Has-equal-element not implemented for x86 32-bit SIMD vectors yet");
+    }
+
+    /*
+     * Returns number of zero elements in vector
+     * See <http://graphics.stanford.edu/~seander/bithacks.html#HasLessInWord>
+     * This is a rewrite of countless(u, 1)
+     */
+    constexpr unsigned int count_equal_elements(EffectiveType) const
+    {
+        CPPBITS_ERROR("Count-equal-elements not implemented for x86 32-bit SIMD vectors yet");
+    }
+
+    /*
+     * Compares `this` to `vec`. If the comparison result is true, the corresponding element is set to all 1's
+     * Otherwise, if the comparison result is false, the corresponding element is set to all 0's
+     * TODO: verify comparisons for floating-point values
+     */
+    type cmp(const simd_vector &vec, compare_type compare) const
+    {
+        if (elements_are_floats)
+        {
+            switch (compare) {
+                default: return type(_mm_cmpeq_ps((__m128) data_, (__m128) vec.vector()));
+                case compare_nequal: return type(_mm_cmpneq_ps((__m128) data_, (__m128) vec.vector()));
+                case compare_less: return type(_mm_cmplt_ps((__m128) data_, (__m128) vec.vector()));
+                case compare_lessequal: return type(_mm_cmple_ps((__m128) data_, (__m128) vec.vector()));
+                case compare_greater: return type(_mm_cmple_ps((__m128) vec.vector(), (__m128) data_));
+                case compare_greaterequal: return type(_mm_cmplt_ps((__m128) vec.vector(), (__m128) data_));
+            }
+        }
+        CPPBITS_ERROR("Integral compare not implemented for x86 32-bit SIMD vectors yet");
+    }
+
+    type operator==(const simd_vector &vec) const {return cmp(vec, compare_equal);}
+    type operator!=(const simd_vector &vec) const {return cmp(vec, compare_nequal);}
+    type operator<(const simd_vector &vec) const {return cmp(vec, compare_less);}
+    type operator<=(const simd_vector &vec) const {return cmp(vec, compare_lessequal);}
+    type operator>(const simd_vector &vec) const {return cmp(vec, compare_greater);}
+    type operator>=(const simd_vector &vec) const {return cmp(vec, compare_greaterequal);}
+
+    /*
+     * Sets each element in output to reciprocal of respective element in `this`
+     * TODO: doesn't work properly for integral values
+     */
+    type reciprocal() const
+    {
+        if (elements_are_floats)
+            return type(_mm_rcp_ps((__m128) data_));
+        else
+        {
+            CPPBITS_ERROR("Reciprocal requested for integral vector");
+            return *this;
+        }
+    }
+
+    /*
+     * Sets each element in output to square-root of respective element in `this`
+     * TODO: doesn't work properly for integral values
+     */
+    type sqrt() const
+    {
+        if (elements_are_floats)
+            return type(_mm_sqrt_ps((__m128) data_));
+        else
+        {
+            CPPBITS_ERROR("Square-root requested for integral vector");
+            return *this;
+        }
+    }
+
+    /*
+     * Sets each element in output to reciprocal of square-root of respective element in `this`
+     * TODO: doesn't work properly for integral values
+     */
+    type rsqrt() const
+    {
+        if (elements_are_floats)
+            return type(_mm_rsqrt_ps((__m128) data_));
+        else
+        {
+            CPPBITS_ERROR("Reciprocal of square-root requested for integral vector");
+            return *this;
+        }
+    }
+
+    /*
+     * Sets each element in output to maximum of respective elements of `this` and `vec`
+     */
+    type max(const simd_vector &vec) const
+    {
+        if (elements_are_floats)
+            return type(_mm_max_ps((__m128) data_, (__m128) vec.vector()));
+        else
+        {
+            CPPBITS_ERROR("Integral max not implemented for x86 32-bit SIMD vectors yet");
+        }
+    }
+
+    /*
+     * Sets each element in output to maximum of respective elements of `this` and `vec`
+     */
+    type min(const simd_vector &vec) const
+    {
+        if (elements_are_floats)
+            return type(_mm_min_ps((__m128) data_, (__m128) vec.vector()));
+        else
+        {
+            CPPBITS_ERROR("Integral min not implemented for x86 32-bit SIMD vectors yet");
+        }
+    }
+
+    /*
+     * Sets element `idx` to `value`
+     * TODO: improve performance?
      */
     template<unsigned int idx>
     type &set(EffectiveType value)
     {
-        data_ |= bitfield_member<T, idx * element_bits, element_bits>(make_t_from_effective(value)).bitfield_value() & mask;
+        alignas(16) uint32_t store[4];
+        _mm_store_ps((float *) store, (__m128) data_);
+        store[idx] = make_t_from_effective(value);
+        data_ = (__m128i) _mm_load_ps((float *) store);
         return *this;
     }
 
     /*
-     * TODO: not yet implemented
+     * Sets element `idx` to `value`
+     * TODO: improve performance?
      */
     type &set(unsigned int idx, EffectiveType value)
     {
-        const unsigned int shift = idx * element_bits;
-        data_ = (data_ & ~(element_mask << shift)) | ((T(value) & element_mask) << shift);
+        alignas(16) uint32_t store[4];
+        _mm_store_ps((float *) store, (__m128) data_);
+        store[idx] = make_t_from_effective(value);
+        data_ = (__m128i) _mm_load_ps((float *) store);
         return *this;
     }
 
     /*
-     * TODO: not yet implemented
+     * Sets all bits of element `idx` to 1
+     */
+    template<unsigned int idx>
+    type &set()
+    {
+        alignas(16) uint32_t store[4];
+        _mm_store_ps((float *) store, (__m128) data_);
+        store[idx] = element_mask;
+        data_ = (__m128i) _mm_load_ps((float *) store);
+        return *this;
+    }
+
+    /*
+     * Sets all bits of element `idx` to 1
      */
     type &set(unsigned int idx)
     {
-        const unsigned int shift = idx * element_bits;
-        data_ |= (element_mask << shift);
+        alignas(16) uint32_t store[4];
+        _mm_store_ps((float *) store, (__m128) data_);
+        store[idx] = element_mask;
+        data_ = (__m128i) _mm_load_ps((float *) store);
         return *this;
     }
 
     /*
-     * TODO: not yet implemented
+     * Sets all bits of element `idx` to 1 if `v` is true, 0 otherwise
+     */
+    type &set_bits(unsigned int idx, bool v)
+    {
+        alignas(16) uint32_t store[4];
+        _mm_store_ps((float *) store, (__m128) data_);
+        store[idx] = v * element_mask;
+        data_ = (__m128i) _mm_load_ps((float *) store);
+        return *this;
+    }
+
+    /*
+     * Sets all bits of element `idx` to 1 if `v` is true, 0 otherwise
+     */
+    template<unsigned int idx>
+    type &set_bits(bool v)
+    {
+        alignas(16) uint32_t store[4];
+        _mm_store_ps((float *) store, (__m128) data_);
+        store[idx] = v * element_mask;
+        data_ = (__m128i) _mm_load_ps((float *) store);
+        return *this;
+    }
+
+    /*
+     * Sets all bits of element `idx` to 0
      */
     template<unsigned int idx>
     type &reset()
     {
-        data_ &= ~bitfield_member<T, idx * element_bits, element_bits>::bitfield_mask();
+        alignas(16) uint32_t store[4];
+        _mm_store_ps((float *) store, (__m128) data_);
+        store[idx] = 0;
+        data_ = (__m128i) _mm_load_ps((float *) store);
         return *this;
     }
 
     /*
-     * TODO: not yet implemented
+     * Sets all bits of element `idx` to 0
      */
     type &reset(unsigned int idx)
     {
-        const unsigned int shift = idx * element_bits;
-        data_ &= ~(element_mask << shift);
+        alignas(16) uint32_t store[4];
+        _mm_store_ps((float *) store, (__m128) data_);
+        store[idx] = 0;
+        data_ = (__m128i) _mm_load_ps((float *) store);
         return *this;
     }
 
     /*
-     * TODO: not yet implemented
+     * Flips all bits of element `idx`
      */
     template<unsigned int idx>
     type &flip()
     {
-        data_ ^= bitfield_member<T, idx * element_bits, element_bits>::bitfield_mask();
+        alignas(16) uint32_t store[4];
+        _mm_store_ps((float *) store, (__m128) data_);
+        store[idx] ^= store[idx];
+        data_ = (__m128i) _mm_load_ps((float *) store);
         return *this;
     }
 
     /*
-     * TODO: not yet implemented
+     * Flips all bits of element `idx`
      */
     type &flip(unsigned int idx)
     {
-        const unsigned int shift = idx * element_bits;
-        data_ ^= (element_mask << shift);
+        alignas(16) uint32_t store[4];
+        _mm_store_ps((float *) store, (__m128) data_);
+        store[idx] ^= store[idx];
+        data_ = (__m128i) _mm_load_ps((float *) store);
         return *this;
     }
 
+    /*
+     * Gets value of element `idx`
+     */
     template<unsigned int idx>
     EffectiveType get() const
     {
-        alignas(16) uint8_t space[16];
-        _mm_store_si128((__m128i *) space, data_);
+        alignas(16) uint32_t space[4];
+        _mm_store_ps((float *) space, (__m128) data_);
 
-        if (elements_are_signed)
+        if (elements_are_signed && !elements_are_floats)
         {
             const T val = space[idx] & (element_mask >> 1);
             const T negative = (space[idx] >> (element_bits - 1)) & 1;
-            return negative? val == 0? scalar_min(): -EffectiveType((~val + 1) & (element_mask >> 1)): EffectiveType(val);
+            return negative? val == 0? scalar_min(): -make_effective_from_t((~val + 1) & (element_mask >> 1)): make_effective_from_t(val);
         }
-        return EffectiveType(space[idx]);
+        return make_effective_from_t(space[idx]);
     }
 
+    /*
+     * Gets value of element `idx`
+     */
     EffectiveType get(unsigned int idx) const
     {
-        alignas(16) uint8_t space[16];
-        _mm_store_si128((__m128i *) space, data_);
+        alignas(16) uint32_t space[4];
+        _mm_store_ps((float *) space, (__m128) data_);
 
-        if (elements_are_signed)
+        if (elements_are_signed && !elements_are_floats)
         {
             const T val = space[idx] & (element_mask >> 1);
             const T negative = (space[idx] >> (element_bits - 1)) & 1;
-            return negative? val == 0? scalar_min(): -EffectiveType((~val + 1) & (element_mask >> 1)): EffectiveType(val);
+            return negative? val == 0? scalar_min(): -make_effective_from_t((~val + 1) & (element_mask >> 1)): make_effective_from_t(val);
         }
-        return EffectiveType(space[idx]);
+        return make_effective_from_t(space[idx]);
     }
 
-    static constexpr T min() {return 0;}
-    static constexpr T max() {return mask;}
+    /*
+     * Returns minumum value of vector
+     */
+    static constexpr __m128i min() {return {};}
 
+    /*
+     * Returns maximum value of vector
+     */
+    static constexpr __m128i max() {return vector_mask();}
+
+    /*
+     * Returns unsigned mask that can contain all element values
+     */
     static constexpr T scalar_mask() {return element_mask;}
-    static constexpr EffectiveType scalar_min() {return elements_are_signed? -EffectiveType(element_mask >> 1) - 1: EffectiveType(0);}
-    static constexpr EffectiveType scalar_max() {return elements_are_signed? EffectiveType(element_mask >> 1): EffectiveType(element_mask);}
+
+    /*
+     * Returns the minimum value an element can contain
+     */
+    static constexpr EffectiveType scalar_min() {return elements_are_signed? -make_effective_from_t(element_mask >> 1) - 1: make_effective_from_t(0);}
+
+    /*
+     * Returns the maximum value an element can contain
+     */
+    static constexpr EffectiveType scalar_max() {return elements_are_signed? make_effective_from_t(element_mask >> 1): make_effective_from_t(element_mask);}
+
+    /*
+     * Returns maximum value of vector
+     */
     static __m128i vector_mask()
     {
         __m128i v;
-        return _mm_cmpeq_epi8(v, v);
+        return _mm_cmpeq_epi32(v, v);
     }
 
-    static constexpr bool is_signed() {return elements_are_signed;}
+    /*
+     * Returns whether elements in this vector are viewed as signed values
+     */
+    static constexpr bool is_signed() {return elements_are_signed || elements_are_floats;}
+
+    /*
+     * Returns the maximum number of elements this vector can contain
+     */
     static constexpr unsigned int max_elements() {return elements;}
+
+    /*
+     * Returns the size in bits of each element
+     */
     static constexpr unsigned int element_size() {return element_bits;}
 
 private:
+    /*
+     * Initializes element `idx` to `value`
+     * Expects that element contains 0 prior to function call
+     */
+    template<unsigned int idx>
+    type &init(EffectiveType value)
+    {
+        return set<idx>(value);
+    }
+
+    /*
+     * Sets element `idx` to `value`
+     * Expects that element contains 0 prior to function call
+     */
+    type &init(unsigned int idx, EffectiveType value)
+    {
+        return set(idx, value);
+    }
+
+    /*
+     * Sets all bits of element `idx` to 1 if `v` is true, 0 otherwise
+     * Expects that element contains 0 prior to function call
+     */
+    type &init_bits(unsigned int idx, bool v)
+    {
+        return set_bits(idx, v);
+    }
+
+    /*
+     * Sets all bits of element `idx` to 1 if `v` is true, 0 otherwise
+     * Expects that element contains 0 prior to function call
+     */
+    template<unsigned int idx>
+    type &init_bits(bool v)
+    {
+        return set_bits<idx>(v);
+    }
+
     static constexpr uint64_t expand_mask_helper(uint64_t mask, unsigned int mask_size, unsigned int level)
     {
         return level == 0? mask:
-                           expand_mask_helper(mask | ((mask & (ones >> ((vector_digits / 2) - mask_size))) <<
+                           expand_mask_helper(mask | ((mask & (ones >> (64 - mask_size))) <<
                                                ((level-1) * element_bits))
                                        , mask_size
                                        , level-1);
     }
-    static constexpr __m128i expand_mask(T mask, unsigned int mask_size)
+    static __m128i expand_mask(T mask, unsigned int mask_size)
     {
+#ifdef CPPBITS_SSE2
         return _mm_set_epi64x(expand_mask_helper(mask, mask_size, elements / 2),
                               expand_mask_helper(mask, mask_size, elements / 2));
+#else
+        alignas(16) uint64_t store[2];
+        store[0] = store[1] = expand_mask_helper(mask, mask_size, elements / 2);
+        return (__m128i) _mm_load_ps((float *) store);
+#endif
+    }
+
+    static constexpr uint64_t expand_small_mask(uint64_t mask, unsigned int mask_size, unsigned int level)
+    {
+        return level == 0? mask:
+                           expand_small_mask(mask | ((mask & (ones >> (64 - mask_size))) <<
+                                               ((level-1) * mask_size))
+                                       , mask_size
+                                       , level-1);
     }
 
     __m128i data_;
 };
-#endif // defined __GNUC__ && (defined __x86_64 || defined __x86_64__)
+#endif // defined CPPBITS_GCC && (defined CPPBITS_X86 || defined CPPBITS_X86_64) && defined CPPBITS_SSE
 
 #endif // X86_SIMD_H

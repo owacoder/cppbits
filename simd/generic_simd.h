@@ -46,7 +46,8 @@ class simd_vector
     static constexpr T element_mask = ones >> (vector_digits - element_bits);
 
     static_assert(!elements_are_floats || (element_bits == 32 || element_bits == 64), "Floating-point element size must be 32 or 64 bits");
-    static_assert(elements, "Element size is too large for specified type");
+    static_assert(elements, "Element size is too large for specified underlying type `T`");
+    static_assert(elements_are_floats || std::numeric_limits<EffectiveType>::digits + elements_are_signed >= element_bits, "Element size is too large for specified effective type `EffectiveType`");
 
     constexpr explicit simd_vector(T value) : data_(value) {}
 
@@ -90,6 +91,16 @@ public:
         shift_natural, /* Either logical or arithmetic, depending on the effective element type */
         shift_logical, /* Logical shift shifts in zeros */
         shift_arithmetic, /* Arithmetic shift copies the sign bit in from the left, zeros from the right */
+    };
+
+    enum compare_type
+    {
+        compare_less, /* Compare `a < b` */
+        compare_lessequal, /* Compare `a <= b` */
+        compare_greater, /* Compare `a > b` */
+        compare_greaterequal, /* Compare `a >= b` */
+        compare_equal, /* Compare `a == b` */
+        compare_nequal /* Compare `a != b` */
     };
 
     /*
@@ -204,27 +215,13 @@ public:
      */
     constexpr EffectiveType horizontal_sum() const
     {
-        return horizontal_sum_helper(elements);
+        return horizontal_sum_helper(data_, elements);
     }
 
     /*
      * Adds elements of `vec` to `this` (using rollover addition) and returns the result
      */
-    type operator+(const simd_vector &vec) const
-    {
-        if (elements_are_floats)
-        {
-            type result;
-            for (unsigned i = 0; i < max_elements(); ++i)
-                result.set(i, get(i) + vec.get(i));
-            return result;
-        }
-        else
-        {
-            constexpr T add_mask = expand_mask(element_mask >> 1, element_bits, elements);
-            return type(((data_ & add_mask) + (vec.vector() & add_mask)) ^ ((data_ ^ vec.vector()) & ~add_mask));
-        }
-    }
+    type operator+(const simd_vector &vec) const {return add(vec, math_keeplow);}
 
     /*
      * Adds elements of `vec` to `this` (using specified math method) and returns the result
@@ -235,7 +232,7 @@ public:
         {
             type result;
             for (unsigned i = 0; i < max_elements(); ++i)
-                result.set(i, get(i) + vec.get(i));
+                result.init(i, get(i) + vec.get(i));
             return result;
         }
         else
@@ -257,7 +254,6 @@ public:
                         const T temp = ((data_ & add_mask) + (vec.vector() & add_mask)) ^ ((data_ ^ vec.vector()) & ~add_mask);
                         return type(temp | ((((data_ & vec.vector()) | (~temp & (data_ | vec.vector()))) & ~add_mask) >> (element_bits - 1)) * element_mask);
                     }
-                    break;
                 case math_keephigh:
                 {
                     constexpr T overflow_mask = expand_mask(1, element_bits, elements);
@@ -265,31 +261,15 @@ public:
                         return type(((((data_ & vec.vector()) | (((data_ & add_mask) + (vec.vector() & add_mask)) & (data_ ^ vec.vector()))) >> (element_bits - 1)) & overflow_mask) * element_mask);
                     else
                         return type((((data_ & vec.vector()) | (((data_ & add_mask) + (vec.vector() & add_mask)) & (data_ ^ vec.vector()))) >> (element_bits - 1)) & overflow_mask);
-                    break;
                 }
             }
         }
-        return *this;
     }
 
     /*
      * Subtracts elements of `vec` to `this` (using rollover subtraction) and returns the result
      */
-    type operator-(const simd_vector &vec) const
-    {
-        if (elements_are_floats)
-        {
-            type result;
-            for (unsigned i = 0; i < max_elements(); ++i)
-                result.set(i, get(i) - vec.get(i));
-            return result;
-        }
-        else
-        {
-            constexpr T sub_mask = expand_mask(element_mask >> 1, element_bits, elements);
-            return type(((data_ | ~sub_mask) - (vec.vector() & sub_mask)) ^ ((data_ ^ ~vec.vector()) & ~sub_mask));
-        }
-    }
+    type operator-(const simd_vector &vec) const {return sub(vec, math_keeplow);}
 
     /*
      * Subtracts elements of `vec` from `this` (using specified math method) and returns the result
@@ -300,7 +280,7 @@ public:
         {
             type result;
             for (unsigned i = 0; i < max_elements(); ++i)
-                result.set(i, get(i) - vec.get(i));
+                result.init(i, get(i) - vec.get(i));
             return result;
         }
         else
@@ -309,7 +289,6 @@ public:
             switch (math) {
                 default: /* Rollover arithmetic, math_keeplow */
                     return type(((data_ | ~sub_mask) - (vec.vector() & sub_mask)) ^ ((data_ ^ ~vec.vector()) & ~sub_mask));
-                    break;
                 case math_saturate:
                     if (elements_are_signed)
                     {
@@ -323,30 +302,152 @@ public:
                         const T temp = ((data_ | ~sub_mask) - (vec.vector() & sub_mask)) ^ ((data_ ^ ~vec.vector()) & ~sub_mask);
                         return type(temp & ((~((vec.vector() & temp) | (~data_ & (vec.vector() | temp))) & ~sub_mask) >> (element_bits - 1)) * element_mask);
                     }
-                    break;
                 case math_keephigh: /* TODO: not accurate right now */
+                    CPPBITS_ERROR("Subtraction with math_keephigh not implemented yet");
                     constexpr T overflow_mask = expand_mask(1, element_bits, elements);
                     if (elements_are_signed)
                         return type((((((data_ | ~sub_mask) - (vec.vector() & sub_mask)) & (data_ ^ ~vec.vector())) >> (element_bits - 1)) & overflow_mask) * element_mask);
                     else
                         return type(((((data_ | ~sub_mask) - (vec.vector() & sub_mask)) & (data_ ^ ~vec.vector())) >> (element_bits - 1)) & overflow_mask);
-                    break;
             }
+        }
+    }
+
+    /*
+     * Multiplies elements of `vec` by `this` (using rollover multiplication) and returns the result
+     */
+    type operator*(const simd_vector &vec) const {return mul(vec, math_keeplow);}
+
+    /*
+     * Multiplies elements of `vec` by `this` (using specified math method) and returns the result
+     */
+    type mul(const simd_vector &vec, math_type math) const
+    {
+        if (elements_are_floats)
+        {
+            type result;
+            for (unsigned i = 0; i < max_elements(); ++i)
+                result.init(i, get(i) * vec.get(i));
+            return result;
+        }
+        else
+        {
+            type result;
+            for (unsigned i = 0; i < max_elements(); ++i)
+            {
+                using namespace std; // for std::max()
+
+                switch (math) {
+                    default: /* Rollover arithmetic, math_keeplow */
+                        result.init(i, get(i) * vec.get(i));
+                        break;
+                    case math_saturate:
+                    {
+                        /* TODO: may overflow, and EffectiveType may not be able to hold the double-size result */
+                        const EffectiveType temp = get(i) * vec.get(i);
+
+                        if (temp > scalar_max())
+                            result.init(i, scalar_max());
+                        else if (elements_are_signed && temp < scalar_min())
+                            result.init(i, scalar_min());
+                        else
+                            result.init(i, temp);
+
+                        break;
+                    }
+                    case math_keephigh: /* TODO: not yet implemented */
+                        CPPBITS_ERROR("Multiplication with math_keephigh not implemented yet");
+                        break;
+                }
+            }
+            return result;
+        }
+    }
+
+    /*
+     * Multiplies elements of `vec` by `this` (using specified math method) and returns the result
+     */
+    constexpr type mul_add(const simd_vector &vec, const simd_vector &add, math_type math) const
+    {
+        return mul(vec, math).add(add, math);
+    }
+
+    /*
+     * Divides elements of `this` by `vec` (using rollover division) and returns the result
+     */
+    type operator/(const simd_vector &vec) const {return div(vec, math_keeplow);}
+
+    /*
+     * Divides elements of `this` by `vec` (using specified math method) and returns the result
+     */
+    type div(const simd_vector &vec, math_type math) const
+    {
+        if (elements_are_floats)
+        {
+            type result;
+            for (unsigned i = 0; i < max_elements(); ++i)
+                result.init(i, get(i) / vec.get(i));
+            return result;
+        }
+        else if (vec.has_zero_element())
+            CPPBITS_ERROR("Division by zero");
+        else
+        {
+            type result;
+            for (unsigned i = 0; i < max_elements(); ++i)
+            {
+                using namespace std; // for std::max()
+
+                switch (math) {
+                    default: /* Rollover arithmetic, math_keeplow */
+                    {
+                        result.init(i, get(i) / vec.get(i));
+                        break;
+                    }
+                    case math_saturate:
+                    {
+                        const EffectiveType temp = get(i) * vec.get(i);
+
+                        if (temp > scalar_max())
+                            result.init(i, scalar_max());
+                        else if (elements_are_signed && temp < scalar_min())
+                            result.init(i, scalar_min());
+                        else
+                            result.init(i, temp);
+
+                        break;
+                    }
+                    case math_keephigh: /* TODO: not yet implemented */
+                        CPPBITS_ERROR("Division with math_keephigh not implemented yet");
+                        break;
+                }
+            }
+            return result;
         }
         return *this;
     }
 
     /*
-     * Computes the average of each element of `this` and `vec` as `((element of this) + (element of vec) + 1)/2`
+     * Computes the average of each element of `this` and `vec` as `((element of this) + (element of vec) + 1)/2` for integral values,
+     * or `((element of this) + (element of vec))/2` for floating-point values
      * TODO: if element_bits == number of bits in T, undefined behavior results
-     * TODO: support floating-point values
      */
     type avg(const simd_vector &vec) const
     {
-        constexpr T ones_mask = expand_mask(1, element_bits * 2, (elements+1) / 2);
-        constexpr T avg_mask = expand_mask(element_mask, element_bits * 2, (elements+1) / 2);
-        return type((((ones_mask + ((data_ >> element_bits) & avg_mask) + ((vec.vector() >> element_bits) & avg_mask)) << (element_bits - 1)) & (avg_mask << element_bits)) |
-                    (((ones_mask + (data_ & avg_mask) + (vec.vector() & avg_mask)) >> 1) & avg_mask));
+        if (elements_are_floats)
+        {
+            type result;
+            for (unsigned i = 0; i < max_elements(); ++i)
+                result.init(i, (get(i) + vec.get(i)) * 0.5);
+            return result;
+        }
+        else
+        {
+            constexpr T ones_mask = expand_mask(1, element_bits * 2, (elements+1) / 2);
+            constexpr T avg_mask = expand_mask(element_mask, element_bits * 2, (elements+1) / 2);
+            return type((((ones_mask + ((data_ >> element_bits) & avg_mask) + ((vec.vector() >> element_bits) & avg_mask)) << (element_bits - 1)) & (avg_mask << element_bits)) |
+                        (((ones_mask + (data_ & avg_mask) + (vec.vector() & avg_mask)) >> 1) & avg_mask));
+        }
     }
 
     /*
@@ -354,10 +455,7 @@ public:
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
      * TODO: support floating-point values
      */
-    constexpr type operator<<(unsigned int amount) const
-    {
-        return type((data_ << amount) & ~(expand_mask(1, element_bits, elements) * (element_mask >> (element_bits - amount))));
-    }
+    constexpr type operator<<(unsigned int amount) const {return shl(amount, shift_natural);}
 
     /*
      * Shifts each element of `this` to the left by `amount` (using specified shift type) and returns the resulting vector
@@ -374,10 +472,7 @@ public:
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
      * TODO: support floating-point values
      */
-    constexpr type operator>>(unsigned int amount) const
-    {
-        return shr(amount, shift_natural);
-    }
+    constexpr type operator>>(unsigned int amount) const {return shr(amount, shift_natural);}
 
     /*
      * Shifts each element of `this` to the right by `amount` (using specified shift type) and returns the resulting vector
@@ -397,7 +492,6 @@ public:
                 }
                 else
                     return type((data_ >> amount) & (expand_mask(1, element_bits, elements) * (element_mask >> amount)));
-                break;
             case shift_arithmetic:
             {
                 constexpr T shift_ones = expand_mask(1, element_bits, elements);
@@ -411,8 +505,26 @@ public:
     }
 
     /*
+     * Extracts MSB from each element and places them in the low bits of the result
+     * Each bit position in the result corresponds to the element position in the source vector
+     * (i.e. Element 0 MSB -> Bit 0, Element 1 MSB -> Bit 1, etc.)
+     */
+    T movmsk() const
+    {
+        if (element_bits == 1)
+            return data_;
+        else
+        {
+            T result = 0;
+            for (unsigned i = 0; i < max_elements(); ++i)
+                result |= ((data_ >> (i * element_bits + element_bits - 1)) & 1) << i;
+        }
+    }
+
+    /*
      * Negates elements of `this` and returns the resulting vector
      * Note that this function returns the value unmodified if EffectiveType is not a signed type
+     * TODO: are floating-point values supported properly?
      */
     type negate() const
     {
@@ -433,6 +545,7 @@ public:
     /*
      * Computes the absolute value of elements of `this` and returns the resulting vector
      * Note that this function returns the value unmodified if EffectiveType is not a signed type
+     * TODO: are floating-point values supported properly?
      */
     type abs() const
     {
@@ -502,17 +615,124 @@ public:
     }
 
     /*
-     * Sets all bits of the vector between `lsb_pos` and `lsb_pos + length` to 1
+     * Compares `this` to `vec`. If the comparison result is true, the corresponding element is set to all 1's
+     * Otherwise, if the comparison result is false, the corresponding element is set to all 0's
+     * TODO: verify comparisons for floating-point values
      */
-    template<unsigned int lsb_pos, unsigned int length>
-    type &set()
+    type cmp(const simd_vector &vec, compare_type compare) const
     {
-        data_ |= bitfield_member<T, lsb_pos, length>::bitfield_mask() & mask;
-        return *this;
+        type result;
+        for (unsigned i = 0; i < max_elements(); ++i)
+        {
+            switch (compare) {
+                default: result.init_bits(i, get(i) == vec.get(i)); break;
+                case compare_nequal: result.init_bits(i, get(i) != vec.get(i)); break;
+                case compare_less: result.init_bits(i, get(i) < vec.get(i)); break;
+                case compare_lessequal: result.init_bits(i, get(i) <= vec.get(i)); break;
+                case compare_greater: result.init_bits(i, get(i) > vec.get(i)); break;
+                case compare_greaterequal: result.init_bits(i, get(i) >= vec.get(i)); break;
+            }
+        }
+        return result;
+    }
+
+    type operator==(const simd_vector &vec) const {return cmp(vec, compare_equal);}
+    type operator!=(const simd_vector &vec) const {return cmp(vec, compare_nequal);}
+    type operator<(const simd_vector &vec) const {return cmp(vec, compare_less);}
+    type operator<=(const simd_vector &vec) const {return cmp(vec, compare_lessequal);}
+    type operator>(const simd_vector &vec) const {return cmp(vec, compare_greater);}
+    type operator>=(const simd_vector &vec) const {return cmp(vec, compare_greaterequal);}
+
+    /*
+     * Sets each element in output to reciprocal of respective element in `this`
+     * TODO: doesn't work properly for integral values
+     */
+    type reciprocal() const
+    {
+        if (elements_are_floats)
+        {
+            type result;
+            for (unsigned i = 0; i < max_elements(); ++i)
+                result.init(i, 1.0 / get(i));
+            return result;
+        }
+        else
+        {
+            CPPBITS_ERROR("Reciprocal requested for integral vector");
+            return *this;
+        }
     }
 
     /*
-     * Sets all bits of element `idx` to 1
+     * Sets each element in output to square-root of respective element in `this`
+     * TODO: doesn't work properly for integral values
+     */
+    type sqrt() const
+    {
+        if (elements_are_floats)
+        {
+            using namespace std;
+            type result;
+            for (unsigned i = 0; i < max_elements(); ++i)
+                result.init(i, sqrt(get(i)));
+            return result;
+        }
+        else
+        {
+            CPPBITS_ERROR("Square-root requested for integral vector");
+            return *this;
+        }
+    }
+
+    /*
+     * Sets each element in output to reciprocal of square-root of respective element in `this`
+     * TODO: doesn't work properly for integral values
+     */
+    type rsqrt() const
+    {
+        if (elements_are_floats)
+        {
+            using namespace std;
+            type result;
+            for (unsigned i = 0; i < max_elements(); ++i)
+                result.init(i, 1.0 / sqrt(get(i)));
+            return result;
+        }
+        else
+        {
+            CPPBITS_ERROR("Reciprocal of square-root requested for integral vector");
+            return *this;
+        }
+    }
+
+    /*
+     * Sets each element in output to maximum of respective elements of `this` and `vec`
+     * TODO: verify comparisons for floating-point values
+     */
+    type max(const simd_vector &vec) const
+    {
+        using namespace std;
+        type result;
+        for (unsigned i = 0; i < max_elements(); ++i)
+            result.init(i, max(get(i), vec.get(i)));
+        return result;
+    }
+
+    /*
+     * Sets each element in output to maximum of respective elements of `this` and `vec`
+     * TODO: verify comparisons for floating-point values
+     */
+    type min(const simd_vector &vec) const
+    {
+        using namespace std;
+        type result;
+        for (unsigned i = 0; i < max_elements(); ++i)
+            result.init(i, min(get(i), vec.get(i)));
+        return result;
+    }
+
+    /*
+     * Sets element `idx` to `value`
      */
     template<unsigned int idx>
     type &set(EffectiveType value)
@@ -534,10 +754,42 @@ public:
     /*
      * Sets all bits of element `idx` to 1
      */
+    template<unsigned int idx>
+    type &set()
+    {
+        const unsigned int shift = idx * element_bits;
+        data_ |= (element_mask << shift);
+        return *this;
+    }
+
+    /*
+     * Sets all bits of element `idx` to 1
+     */
     type &set(unsigned int idx)
     {
         const unsigned int shift = idx * element_bits;
         data_ |= (element_mask << shift);
+        return *this;
+    }
+
+    /*
+     * Sets all bits of element `idx` to 1 if `v` is true, 0 otherwise
+     */
+    type &set_bits(unsigned int idx, bool v)
+    {
+        const unsigned int shift = idx * element_bits;
+        data_ = (data_ & ~(element_mask << shift)) | ((v * element_mask) << shift);
+        return *this;
+    }
+
+    /*
+     * Sets all bits of element `idx` to 1 if `v` is true, 0 otherwise
+     */
+    template<unsigned int idx>
+    type &set_bits(bool v)
+    {
+        const unsigned int shift = idx * element_bits;
+        data_ = (data_ & ~(element_mask << shift)) | ((v * element_mask) << shift);
         return *this;
     }
 
@@ -658,6 +910,51 @@ public:
     static constexpr unsigned int element_size() {return element_bits;}
 
 private:
+    /*
+     * Initializes element `idx` to `value`
+     * Expects that element contains 0 prior to function call
+     */
+    template<unsigned int idx>
+    type &init(EffectiveType value)
+    {
+        data_ |= bitfield_member<T, idx * element_bits, element_bits>(make_t_from_effective(value)).bitfield_value() & mask;
+        return *this;
+    }
+
+    /*
+     * Sets element `idx` to `value`
+     * Expects that element contains 0 prior to function call
+     */
+    type &init(unsigned int idx, EffectiveType value)
+    {
+        const unsigned int shift = idx * element_bits;
+        data_ |= ((make_t_from_effective(value) & element_mask) << shift);
+        return *this;
+    }
+
+    /*
+     * Sets all bits of element `idx` to 1 if `v` is true, 0 otherwise
+     * Expects that element contains 0 prior to function call
+     */
+    type &init_bits(unsigned int idx, bool v)
+    {
+        const unsigned int shift = idx * element_bits;
+        data_ |= ((v * element_mask) << shift);
+        return *this;
+    }
+
+    /*
+     * Sets all bits of element `idx` to 1 if `v` is true, 0 otherwise
+     * Expects that element contains 0 prior to function call
+     */
+    template<unsigned int idx>
+    type &init_bits(bool v)
+    {
+        const unsigned int shift = idx * element_bits;
+        data_ |= ((v * element_mask) << shift);
+        return *this;
+    }
+
     static constexpr T expand_mask(T mask, unsigned int mask_size, unsigned int level)
     {
         return level == 0? mask:
@@ -674,9 +971,9 @@ private:
                                                     , mask_size
                                                     , number_of_bits_to_merge / 2);
     }
-    constexpr EffectiveType horizontal_sum_helper(unsigned int level) const
+    constexpr EffectiveType horizontal_sum_helper(T vector, unsigned int level) const
     {
-        return level == 0? EffectiveType(0): EffectiveType(get(level-1) + horizontal_sum_helper(level-1));
+        return level == 0? EffectiveType(0): EffectiveType(type(vector).get(level-1) + horizontal_sum_helper(vector, level-1));
     }
 
     T data_;
