@@ -1,69 +1,126 @@
+#define CPPBITS_ERROR_EXCEPTIONS
+
 #include "simd/generic_simd.h"
+#include "simd/x86_simd.h"
 #include <iostream>
+
+template<typename T, unsigned int size, typename Effective>
+void test_addition_low()
+{
+    typedef simd_vector<T, size, Effective> type;
+    Effective src1[type::max_elements()];
+    Effective src2[type::max_elements()];
+    Effective dst[type::max_elements()];
+
+    type vec1, vec2;
+
+    for (unsigned i = 0; i < vec1.max_elements(); ++i)
+    {
+        src1[i] = rand();
+        src2[i] = rand();
+        dst[i] = src1[i] + src2[i];
+
+        vec1.set(i, src1[i]);
+        vec2.set(i, src2[i]);
+    }
+
+    vec1 = vec1.add(vec2, vec1.math_keeplow);
+
+    for (unsigned i = 0; i < vec1.max_elements(); ++i)
+    {
+        if (vec1.get(i) != dst[i])
+        {
+            std::cerr << "test_addition_low failed: expected " << dst[i] << " but got " << vec1.get(i) << std::endl;
+            return;
+        }
+    }
+
+    std::cout << "test_addition_low passed!\n";
+}
+
+template<typename T, unsigned int size, typename Effective>
+void test_subtraction_low()
+{
+    typedef simd_vector<T, size, Effective> type;
+    Effective src1[type::max_elements()];
+    Effective src2[type::max_elements()];
+    Effective dst[type::max_elements()];
+
+    type vec1, vec2;
+
+    for (unsigned i = 0; i < vec1.max_elements(); ++i)
+    {
+        src1[i] = rand();
+        src2[i] = rand();
+        dst[i] = src1[i] - src2[i];
+
+        vec1.set(i, src1[i]);
+        vec2.set(i, src2[i]);
+    }
+
+    vec1 = vec1.sub(vec2, vec1.math_keeplow);
+
+    for (unsigned i = 0; i < vec1.max_elements(); ++i)
+    {
+        if (vec1.get(i) != dst[i])
+        {
+            std::cerr << "test_subtraction_low failed: expected " << dst[i] << " but got " << vec1.get(i) << std::endl;
+            return;
+        }
+    }
+
+    std::cout << "test_subtraction_low passed!\n";
+}
+
+#include <ctime>
 
 int main(int, char **)
 {
-#if 0
-    try
-    {
-        std::vector<int> item;
-        std::map<int, int> map;
+    srand(std::time(NULL));
 
-        map = container_cast<decltype(map)>(item);
-    }
-    catch (std::exception &e)
-    {
-        std::cerr << e.what() << std::endl;
-    }
-#endif
+    test_addition_low<uint8_t, 8, uint8_t>();
+    test_addition_low<uint8_t, 8, int8_t>();
+    test_addition_low<uint16_t, 8, uint8_t>();
+    test_addition_low<uint16_t, 8, int8_t>();
+    test_addition_low<uint32_t, 8, uint8_t>();
+    test_addition_low<uint32_t, 8, int8_t>();
+    test_addition_low<uint64_t, 8, uint8_t>();
+    test_addition_low<uint64_t, 8, int8_t>();
 
-    typedef simd_vector<unsigned, 8, signed> mvector;
-    typedef simd_vector<unsigned, 8, unsigned> muvector;
-    typedef simd_vector<unsigned, 16, unsigned> mu16vector;
-    typedef simd_vector<uint64_t, 64, double> mufloatvector;
+    test_addition_low<uint16_t, 16, uint16_t>();
+    test_addition_low<uint16_t, 16, int16_t>();
+    test_addition_low<uint32_t, 16, uint16_t>();
+    test_addition_low<uint32_t, 16, int16_t>();
+    test_addition_low<uint64_t, 16, uint16_t>();
+    test_addition_low<uint64_t, 16, int16_t>();
 
-#if 0
-    std::cout << "element mask: " << mvector::scalar_mask() << "\n";
-    std::cout << "element min: " << mvector::scalar_min() << "\n";
-    std::cout << "element max: " << mvector::scalar_max() << "\n";
-#endif
+    test_addition_low<uint32_t, 32, uint32_t>();
+    test_addition_low<uint32_t, 32, int32_t>();
+    test_addition_low<uint64_t, 32, uint32_t>();
+    test_addition_low<uint64_t, 32, int32_t>();
+    test_addition_low<uint32_t, 32, float>();
+    test_addition_low<uint64_t, 32, float>();
 
-    mvector vec, vec2;
+    test_subtraction_low<uint8_t, 8, uint8_t>();
+    test_subtraction_low<uint8_t, 8, int8_t>();
+    test_subtraction_low<uint16_t, 8, uint8_t>();
+    test_subtraction_low<uint16_t, 8, int8_t>();
+    test_subtraction_low<uint32_t, 8, uint8_t>();
+    test_subtraction_low<uint32_t, 8, int8_t>();
+    test_subtraction_low<uint64_t, 8, uint8_t>();
+    test_subtraction_low<uint64_t, 8, int8_t>();
 
-    vec.broadcast(vec.scalar_max());
-    vec2.broadcast(vec.scalar_max());
+    test_subtraction_low<uint16_t, 16, uint16_t>();
+    test_subtraction_low<uint16_t, 16, int16_t>();
+    test_subtraction_low<uint32_t, 16, uint16_t>();
+    test_subtraction_low<uint32_t, 16, int16_t>();
+    test_subtraction_low<uint64_t, 16, uint16_t>();
+    test_subtraction_low<uint64_t, 16, int16_t>();
 
-    vec.sub(vec2, vec.math_keeplow);
-
-#if 1
-    vec.broadcast(-128);
-    vec2.broadcast(-1);
-
-    for (int i = 0; i < mvector::max_elements(); ++i)
-    {
-        std::cout << "vec1(" << i << "): " << vec.get(i) << "\n";
-        std::cout << "vec2(" << i << "): " << vec2.get(i) << "\n";
-    }
-
-    //std::cout << std::hex << vec.vector() << std::endl;
-
-    std::cout << "After addition:\n" << std::dec;
-
-    vec.add(vec2, vec.math_keeplow);
-    mu16vector uvec;// = vec.cast<16, unsigned>();
-    mufloatvector fvec = vec.cast<uint64_t, 64, double>();
-    //vec = vec.fill_if_nonzero();
-
-    for (unsigned i = 0; i < mvector::max_elements(); ++i)
-    {
-        std::cout << "vec1(" << i << "): " << vec.get(i) << "\n";
-        std::cout << "vec2(" << i << "): " << vec2.get(i) << "\n";
-        std::cout << "uvec(" << i << "): " << uvec.get(i) << "\n";
-    }
-
-    for (unsigned i = 0; i < mufloatvector::max_elements(); ++i)
-        std::cout << "float(" << i << "): " << fvec.get(i) << "\n";
-
-    //std::cout << std::hex << vec.vector() << std::endl;
-#endif
+    test_subtraction_low<uint32_t, 32, uint32_t>();
+    test_subtraction_low<uint32_t, 32, int32_t>();
+    test_subtraction_low<uint64_t, 32, uint32_t>();
+    test_subtraction_low<uint64_t, 32, int32_t>();
+    test_subtraction_low<uint32_t, 32, float>();
+    test_subtraction_low<uint64_t, 32, float>();
 }
