@@ -1,6 +1,12 @@
 #ifndef ENVIRONMENT_H
 #define ENVIRONMENT_H
 
+#ifdef CPPBITS_OPTIONS
+# error Define CPPBITS_ERROR_EXCEPTIONS if you want errors to be thrown as exceptions
+# error Define CPPBITS_ERROR_PRINT_AND_TERMINATE if you want errors to be written to STDERR and the program terminated
+# error Define CPPBITS_ERROR_TERMINATE if you want errors to terminate immediately
+#endif
+
 #ifdef __GNUC__
 # define CPPBITS_GCC
 #endif
@@ -39,6 +45,10 @@
 
 #if defined __ia64 || defined __ia64__ || defined _IA64 || defined __IA64__ || defined _M_IA64 || defined __itanium__ || defined __x86_64 || defined __x86_64__
 # define CPPBITS_X86_64
+#endif
+
+#if !defined CPPBITS_X86 && !defined CPPBITS_X86_64
+# define CPPBITS_ONLY_GENERIC_SIMD
 #endif
 
 #include <iostream>
