@@ -1,7 +1,6 @@
 #define CPPBITS_ERROR_PRINT_AND_TERMINATE
 
-#include "simd/generic_simd.h"
-#include "simd/x86_simd.h"
+#include "cppbits.h"
 #include <iostream>
 
 #include <typeinfo>
@@ -9,7 +8,7 @@
 template<typename T, unsigned int size, typename Effective>
 void test_addition_low()
 {
-    typedef simd_vector<T, size, Effective> type;
+    typedef simd_vector<0, T, size, Effective> type;
     Effective src1[type::max_elements()];
     Effective src2[type::max_elements()];
     Effective dst[type::max_elements()];
@@ -44,7 +43,7 @@ void test_addition_low()
 template<typename T, unsigned int size, typename Effective>
 void test_subtraction_low()
 {
-    typedef simd_vector<T, size, Effective> type;
+    typedef simd_vector<0, T, size, Effective> type;
     Effective src1[type::max_elements()];
     Effective src2[type::max_elements()];
     Effective dst[type::max_elements()];
@@ -79,7 +78,7 @@ void test_subtraction_low()
 template<typename T, unsigned int size, typename Effective>
 void test_multiplication_low()
 {
-    typedef simd_vector<T, size, Effective> type;
+    typedef simd_vector<0, T, size, Effective> type;
     Effective src1[type::max_elements()];
     Effective src2[type::max_elements()];
     Effective dst[type::max_elements()];
@@ -114,7 +113,7 @@ void test_multiplication_low()
 template<typename T, unsigned int size, typename Effective>
 void test_division_low()
 {
-    typedef simd_vector<T, size, Effective> type;
+    typedef simd_vector<0, T, size, Effective> type;
     Effective src1[type::max_elements()];
     Effective src2[type::max_elements()];
     Effective dst[type::max_elements()];
@@ -237,7 +236,6 @@ int main(int, char **)
     test_multiplication_low<uint64_t, 64, int64_t>();
     test_multiplication_low<uint64_t, 64, double>();
 
-#if 0
     test_division_low<uint8_t, 3, uint8_t>();
 
     test_division_low<uint8_t, 8, uint8_t>();
@@ -266,5 +264,51 @@ int main(int, char **)
     test_division_low<uint64_t, 64, uint64_t>();
     test_division_low<uint64_t, 64, int64_t>();
     test_division_low<uint64_t, 64, double>();
-#endif
+
+    typedef uint8_t underlying_type;
+    typedef simd_vector<0, uint32_t, sizeof(underlying_type) * CHAR_BIT, underlying_type> vector;
+    constexpr unsigned long long iters = 100000000;
+    constexpr unsigned long long size = vector::max_elements();
+    underlying_type *data = new underlying_type[size];
+    underlying_type *data2 = new underlying_type[size];
+    underlying_type *dest = new underlying_type[size];
+    underlying_type *dest2 = new underlying_type[size];
+
+    for (unsigned i = 0; i < size; ++i)
+        data[i] = rand(), data2[i] = rand();
+
+    clock_t first = clock();
+    for (unsigned long long j = 0; j < size; ++j)
+    {
+        dest[j] = data[j];
+        for (unsigned long long i = 0; i < iters; ++i)
+            dest[j] *= data2[j];
+    }
+    double first_result = ((double) clock() - first) / CLOCKS_PER_SEC;
+    std::cout << "\nFirst computation took: " << first_result << "\n";
+
+    vector a, b;
+
+    clock_t second = clock();
+    for (unsigned long long j = 0; j < size; j += vector::max_elements())
+    {
+        a.load_unpacked(data + j);
+        b.load_unpacked(data2 + j);
+        for (unsigned long long i = 0; i < iters; ++i)
+            a = a * b;
+        a.dump_unpacked(dest2 + j);
+    }
+    double second_result = ((double) clock() - second) / CLOCKS_PER_SEC;
+    std::cout << "Second computation took: " << second_result << "\n";
+    std::cout << "SIMD was " << (first_result / second_result) << " times faster\n\n";
+
+    for (unsigned i = 0; i < vector::max_elements(); ++i)
+        if (dest[i] != dest2[i])
+        {
+            std::cerr << "Invalid result " << dest2[i] << " at element " << i << ": expected " << dest[i] << "\n";
+            std::cerr << "Difference: " << (dest2[i] - dest[i]) << "\n";
+            return 1;
+        }
+
+    return 0;
 }

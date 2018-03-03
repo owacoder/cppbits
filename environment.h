@@ -67,6 +67,33 @@ private:
     const char *what_;
 };
 
+namespace impl
+{
+    template<unsigned int size>
+    struct unsigned_int {};
+    template<>
+    struct unsigned_int<8> {typedef uint8_t type;};
+    template<>
+    struct unsigned_int<16> {typedef uint16_t type;};
+    template<>
+    struct unsigned_int<32> {typedef uint32_t type;};
+    template<>
+    struct unsigned_int<64> {typedef uint64_t type;};
+
+    template<typename To, typename From, unsigned int alignment = (alignof(From) > alignof(To)? alignof(From): alignof(To))>
+    To type_punning_cast(From from)
+    {
+        union alignas(alignment) packed_union
+        {
+            From from;
+            To to;
+        } u;
+
+        u.from = from;
+        return u.to;
+    }
+}
+
 #if !defined CPPBITS_ERROR_EXCEPTIONS && !defined CPPBITS_ERROR_PRINT_AND_TERMINATE && !defined CPPBITS_ERROR_TERMINATE
 #define CPPBITS_ERROR_EXCEPTIONS
 #endif
