@@ -8,7 +8,7 @@
 template<typename T, unsigned int size, typename Effective>
 void test_addition_low()
 {
-    typedef simd_vector<0, T, size, Effective> type;
+    typedef cppbits::simd_vector<0, T, size, Effective> type;
     Effective src1[type::max_elements()];
     Effective src2[type::max_elements()];
     Effective dst[type::max_elements()];
@@ -26,7 +26,7 @@ void test_addition_low()
         vdst.set(i, dst[i]);
     }
 
-    vec1 = vec1.add(vec2, vec1.math_keeplow);
+    vec1 = vec1.add(vec2, cppbits::math_keeplow);
 
     for (unsigned i = 0; i < vec1.max_elements(); ++i)
     {
@@ -43,7 +43,7 @@ void test_addition_low()
 template<typename T, unsigned int size, typename Effective>
 void test_subtraction_low()
 {
-    typedef simd_vector<0, T, size, Effective> type;
+    typedef cppbits::simd_vector<0, T, size, Effective> type;
     Effective src1[type::max_elements()];
     Effective src2[type::max_elements()];
     Effective dst[type::max_elements()];
@@ -61,7 +61,7 @@ void test_subtraction_low()
         vdst.set(i, dst[i]);
     }
 
-    vec1 = vec1.sub(vec2, vec1.math_keeplow);
+    vec1 = vec1.sub(vec2, cppbits::math_keeplow);
 
     for (unsigned i = 0; i < vec1.max_elements(); ++i)
     {
@@ -78,7 +78,7 @@ void test_subtraction_low()
 template<typename T, unsigned int size, typename Effective>
 void test_multiplication_low()
 {
-    typedef simd_vector<0, T, size, Effective> type;
+    typedef cppbits::simd_vector<0, T, size, Effective> type;
     Effective src1[type::max_elements()];
     Effective src2[type::max_elements()];
     Effective dst[type::max_elements()];
@@ -96,7 +96,7 @@ void test_multiplication_low()
         vdst.set(i, dst[i]);
     }
 
-    vec1 = vec1.mul(vec2, vec1.math_keeplow);
+    vec1 = vec1.mul(vec2, cppbits::math_keeplow);
 
     for (unsigned i = 0; i < vec1.max_elements(); ++i)
     {
@@ -113,7 +113,7 @@ void test_multiplication_low()
 template<typename T, unsigned int size, typename Effective>
 void test_division_low()
 {
-    typedef simd_vector<0, T, size, Effective> type;
+    typedef cppbits::simd_vector<0, T, size, Effective> type;
     Effective src1[type::max_elements()];
     Effective src2[type::max_elements()];
     Effective dst[type::max_elements()];
@@ -131,7 +131,7 @@ void test_division_low()
         vdst.set(i, dst[i]);
     }
 
-    vec1 = vec1.div(vec2, vec1.math_keeplow);
+    vec1 = vec1.div(vec2, cppbits::math_keeplow);
 
     for (unsigned i = 0; i < vec1.max_elements(); ++i)
     {
@@ -265,10 +265,10 @@ int main(int, char **)
     test_division_low<uint64_t, 64, int64_t>();
     test_division_low<uint64_t, 64, double>();
 
-    typedef uint8_t underlying_type;
-    typedef simd_vector<0, uint32_t, sizeof(underlying_type) * CHAR_BIT, underlying_type> vector;
-    constexpr unsigned long long iters = 100000000;
-    constexpr unsigned long long size = vector::max_elements();
+    typedef float underlying_type;
+    typedef cppbits::vector16<underlying_type> vector;
+    constexpr unsigned long long iters = 500000000;
+    constexpr unsigned long long size = vector::max_elements() * 2;
     underlying_type *data = new underlying_type[size];
     underlying_type *data2 = new underlying_type[size];
     underlying_type *dest = new underlying_type[size];
@@ -282,12 +282,14 @@ int main(int, char **)
     {
         dest[j] = data[j];
         for (unsigned long long i = 0; i < iters; ++i)
-            dest[j] *= data2[j];
+            dest[j] = (data2[j] - dest[j]) * dest[j];
     }
     double first_result = ((double) clock() - first) / CLOCKS_PER_SEC;
     std::cout << "\nFirst computation took: " << first_result << "\n";
 
     vector a, b;
+
+    std::cout << "aligned? " << vector::ptr_is_aligned(data+1) << "\n";
 
     clock_t second = clock();
     for (unsigned long long j = 0; j < size; j += vector::max_elements())
@@ -295,7 +297,7 @@ int main(int, char **)
         a.load_unpacked(data + j);
         b.load_unpacked(data2 + j);
         for (unsigned long long i = 0; i < iters; ++i)
-            a = a * b;
+            a = b.sub(a, cppbits::math_accurate).mul(a, cppbits::math_accurate);
         a.dump_unpacked(dest2 + j);
     }
     double second_result = ((double) clock() - second) / CLOCKS_PER_SEC;

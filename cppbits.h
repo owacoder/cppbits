@@ -28,6 +28,7 @@
 #include "simd/generic_simd.h"
 #include "simd/x86_simd.h"
 
+namespace cppbits {
 template<unsigned int desired_elements, typename T, unsigned int element_bits, typename EffectiveType>
 class simd_vector
 {
@@ -36,41 +37,221 @@ class simd_vector
     static constexpr unsigned int native_vector_count = desired_elements? (desired_elements + native_vector::max_elements() - 1) / native_vector::max_elements(): 1;
 
 public:
-    enum broadcast_type
+    /*
+     * Returns a new representation of the vector, casted to a different type.
+     * The data is not modified.
+     */
+    template<typename NewType>
+    simd_vector<desired_elements, T, element_bits, NewType> cast() const
     {
-        broadcast_none, /* Initialize entire vector with provided value */
-        broadcast_scalar, /* Single scalar value in element position 0 */
-        broadcast_all /* Broadcast value to all positions */
-    };
+        simd_vector<desired_elements, T, element_bits, NewType> result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i].template cast<NewType>();
+        return result;
+    }
 
-    enum math_type
+    /*
+     * Returns a new representation of the vector, casted to a different type with different element size.
+     * The data is not modified.
+     * TODO: needs work. Changing element sizes across the entire vector is a tricky endeavor.
+     */
+    template<unsigned int element_size, typename NewType>
+    simd_vector<desired_elements, T, element_size, NewType> cast() const
     {
-        /* Integral math modes (When used on a floating-point vector, math_accurate is used instead) */
-        math_saturate, /* Saturating arithmetic */
-        math_keephigh, /* Keep high part of result */
-        math_keeplow, /* Rollover arithmetic, keep low part of result */
+        simd_vector<desired_elements, T, element_size, NewType> result;
+        for (unsigned i = 0; i < std::min(native_vector_count, result.native_vector_count); ++i)
+            result.array_[i] = array_[i].template cast<element_size, NewType>();
+        return result;
+    }
 
-        /* Floating-point math modes (When used on an integral vector, math_keeplow is used instead) */
-        math_accurate = math_keeplow, /* As accurate a result as possible */
-        math_approximate /* An approximate result is okay, if it is available and speeds things up */
-    };
-
-    enum shift_type
+    /*
+     * Returns a representation of a vector with specified value assigned to element 0
+     */
+    static type make_scalar(EffectiveType value)
     {
-        shift_natural, /* Either logical or arithmetic, depending on the effective element type */
-        shift_logical, /* Logical shift shifts in zeros */
-        shift_arithmetic /* Arithmetic shift copies the sign bit in from the left, zeros from the right */
-    };
+        type result;
+        result.array_[0].scalar(value);
+        return result;
+    }
 
-    enum compare_type
+    /*
+     * Returns a representation of a vector with specified value assigned to every element in the vector
+     */
+    static type make_broadcast(EffectiveType value)
     {
-        compare_less, /* Compare `a < b` */
-        compare_lessequal, /* Compare `a <= b` */
-        compare_greater, /* Compare `a > b` */
-        compare_greaterequal, /* Compare `a >= b` */
-        compare_equal, /* Compare `a == b` */
-        compare_nequal /* Compare `a != b` */
-    };
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i].broadcast(value);
+        return result;
+    }
+
+    /*
+     * Sets this vector to a representation of a vector with specified value assigned to element 0
+     * All elements other than element 0 are zeroed.
+     */
+    type &scalar(EffectiveType value) {return *this = make_scalar(value);}
+
+    /*
+     * Sets this vector to a representation of a vector with specified value assigned to every element
+     */
+    type &broadcast(EffectiveType value) {return *this = make_broadcast(value);}
+
+    /*
+     * Returns the value of element 0
+     */
+    EffectiveType scalar() const {return get<0>();}
+
+    /*
+     * Logical NOT's the entire vector and returns it
+     */
+    type operator~() const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = ~array_[i];
+        return result;
+    }
+
+    /*
+     * Logical OR's the entire vector with `vec` and returns it
+     */
+    type operator|(type vec) const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i] | vec;
+        return result;
+    }
+
+    /*
+     * Logical AND's the entire vector with `vec` and returns it
+     */
+    type operator&(type vec) const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i] & vec;
+        return result;
+    }
+
+    /*
+     * Logical AND's the entire vector with negated `vec` and returns it
+     */
+    type and_not(type vec) const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i].and_not(vec);
+        return result;
+    }
+
+    /*
+     * Logical XOR's the entire vector with `vec` and returns it
+     */
+    type operator^(type vec) const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i] ^ vec;
+        return result;
+    }
+
+    /*
+     * Adds all elements of `this` and returns the resulting sum
+     */
+    EffectiveType horizontal_sum() const
+    {
+        EffectiveType result = 0;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result += array_[i].horizontal_sum();
+        return result;
+    }
+
+    /*
+     * Adds elements of `vec` to `this` (using rollover addition) and returns the result
+     */
+    type operator+(type vec) const {return add(vec, cppbits::math_keeplow);}
+
+    /*
+     * Adds elements of `vec` to `this` (using specified math method) and returns the result
+     */
+    type add(type vec, cppbits::math_type math) const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i].add(vec.array_[i], math);
+        return result;
+    }
+
+    /*
+     * Subtracts elements of `vec` to `this` (using rollover subtraction) and returns the result
+     */
+    type operator-(type vec) const {return sub(vec, cppbits::math_keeplow);}
+
+    /*
+     * Subtracts elements of `vec` from `this` (using specified math method) and returns the result
+     */
+    type sub(type vec, cppbits::math_type math) const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i].sub(vec.array_[i], math);
+        return result;
+    }
+
+    /*
+     * Multiplies elements of `vec` by `this` (using rollover multiplication) and returns the result
+     */
+    type operator*(type vec) const {return mul(vec, cppbits::math_keeplow);}
+
+    /*
+     * Multiplies elements of `vec` by `this` (using specified math method) and returns the result
+     */
+    type mul(type vec, cppbits::math_type math) const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i].mul(vec.array_[i], math);
+        return result;
+    }
+
+    /*
+     * Multiplies elements of `vec` by `this` (using specified math method), adds `add`, and returns the result
+     */
+    type mul_add(type vec, type add, cppbits::math_type math) const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i].mul_add(vec.array_[i], add.array_[i], math);
+        return result;
+    }
+
+    /*
+     * Multiplies elements of `vec` by `this` (using specified math method), subtracts `sub`, and returns the result
+     */
+    type mul_sub(type vec, type sub, cppbits::math_type math) const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i].mul_sub(vec.array_[i], sub.array_[i], math);
+        return result;
+    }
+
+    /*
+     * Divides elements of `this` by `vec` (using rollover division) and returns the result
+     */
+    type operator/(type vec) const {return div(vec, cppbits::math_keeplow);}
+
+    /*
+     * Divides elements of `this` by `vec` (using specified math method) and returns the result
+     */
+    type div(type vec, cppbits::math_type math) const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i].div(vec.array_[i], math);
+        return result;
+    }
 
     /*
      * Computes the average of each element of `this` and `vec` as `((element of this) + (element of vec) + 1)/2` for integral values,
@@ -80,7 +261,7 @@ public:
     {
         type result;
         for (unsigned i = 0; i < native_vector_count; ++i)
-            result.array_[i] = array_[i].avg(vec);
+            result.array_[i] = array_[i].avg(vec.array_[i]);
         return result;
     }
 
@@ -94,7 +275,7 @@ public:
      * Shifts each element of `this` to the left by `amount` and returns the resulting vector
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
      */
-    constexpr type shl(unsigned int amount) const
+    type shl(unsigned int amount) const
     {
         type result;
         for (unsigned i = 0; i < native_vector_count; ++i)
@@ -106,13 +287,13 @@ public:
      * Shifts each element of `this` to the right by `amount` (using shift_natural behavior) and returns the resulting vector
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
      */
-    constexpr type operator>>(unsigned int amount) const {return shr(amount, shift_natural);}
+    constexpr type operator>>(unsigned int amount) const {return shr(amount, cppbits::shift_natural);}
 
     /*
      * Shifts each element of `this` to the right by `amount` (using specified shift type) and returns the resulting vector
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
      */
-    type shr(unsigned int amount, shift_type shift) const
+    type shr(unsigned int amount, cppbits::shift_type shift) const
     {
         type result;
         for (unsigned i = 0; i < native_vector_count; ++i)
@@ -145,7 +326,18 @@ public:
     }
 
     /*
-     * Sets each element of `this` to zero if the element is zero, or all ones otherwise, and returns the resulting vector
+     * Computes the hypotenuse length (`sqrt(x^2 + y^2)`) and returns the resulting vector
+     */
+    type hypot(type vec, cppbits::math_type math) const
+    {
+        type result;
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            result.array_[i] = array_[i].mul_add(array_[i], vec.array_[i].mul(vec.array_[i], math), math).sqrt(math);
+        return result;
+    }
+
+    /*
+     * Sets each element of `this` to zero if the element is zero (sign of zero irrelevant in the case of floating-point), or all ones otherwise, and returns the resulting vector
      */
     type fill_if_nonzero() const
     {
@@ -197,7 +389,7 @@ public:
      * Compares `this` to `vec`. If the comparison result is true, the corresponding element is set to all 1's
      * Otherwise, if the comparison result is false, the corresponding element is set to all 0's
      */
-    type cmp(type vec, compare_type compare) const
+    type cmp(type vec, cppbits::compare_type compare) const
     {
         type result;
         for (unsigned i = 0; i < native_vector_count; ++i)
@@ -205,17 +397,17 @@ public:
         return result;
     }
 
-    type operator==(type vec) const {return cmp(vec, compare_equal);}
-    type operator!=(type vec) const {return cmp(vec, compare_nequal);}
-    type operator<(type vec) const {return cmp(vec, compare_less);}
-    type operator<=(type vec) const {return cmp(vec, compare_lessequal);}
-    type operator>(type vec) const {return cmp(vec, compare_greater);}
-    type operator>=(type vec) const {return cmp(vec, compare_greaterequal);}
+    type operator==(type vec) const {return cmp(vec, cppbits::compare_equal);}
+    type operator!=(type vec) const {return cmp(vec, cppbits::compare_nequal);}
+    type operator<(type vec) const {return cmp(vec, cppbits::compare_less);}
+    type operator<=(type vec) const {return cmp(vec, cppbits::compare_lessequal);}
+    type operator>(type vec) const {return cmp(vec, cppbits::compare_greater);}
+    type operator>=(type vec) const {return cmp(vec, cppbits::compare_greaterequal);}
 
     /*
      * Sets each element in output to reciprocal of respective element in `this`
      */
-    type reciprocal(math_type math) const
+    type reciprocal(cppbits::math_type math) const
     {
         type result;
         for (unsigned i = 0; i < native_vector_count; ++i)
@@ -226,7 +418,7 @@ public:
     /*
      * Sets each element in output to square-root of respective element in `this`
      */
-    type sqrt(math_type math) const
+    type sqrt(cppbits::math_type math) const
     {
         type result;
         for (unsigned i = 0; i < native_vector_count; ++i)
@@ -237,7 +429,7 @@ public:
     /*
      * Sets each element in output to reciprocal of square-root of respective element in `this`
      */
-    type rsqrt(math_type math) const
+    type rsqrt(cppbits::math_type math) const
     {
         type result;
         for (unsigned i = 0; i < native_vector_count; ++i)
@@ -292,7 +484,7 @@ public:
     template<unsigned int idx>
     type &set()
     {
-        array_[idx / native_vector::max_elements()].set<idx % native_vector::max_elements()>();
+        array_[idx / native_vector::max_elements()].template set<idx % native_vector::max_elements()>();
         return *this;
     }
 
@@ -311,7 +503,7 @@ public:
     template<unsigned int idx>
     type &set_bits(bool v)
     {
-        array_[idx / native_vector::max_elements()].set_bits<idx % native_vector::max_elements()>(v);
+        array_[idx / native_vector::max_elements()].template set_bits<idx % native_vector::max_elements()>(v);
         return *this;
     }
 
@@ -330,7 +522,7 @@ public:
     template<unsigned int idx>
     type &reset()
     {
-        array_[idx / native_vector::max_elements()].reset<idx % native_vector::max_elements()>();
+        array_[idx / native_vector::max_elements()].template reset<idx % native_vector::max_elements()>();
         return *this;
     }
 
@@ -349,7 +541,7 @@ public:
     template<unsigned int idx>
     type &flip()
     {
-        array_[idx / native_vector::max_elements()].flip<idx % native_vector::max_elements()>();
+        array_[idx / native_vector::max_elements()].template flip<idx % native_vector::max_elements()>();
         return *this;
     }
 
@@ -368,7 +560,7 @@ public:
     template<unsigned int idx>
     constexpr EffectiveType get() const
     {
-        return array_[idx / native_vector::max_elements()].get<idx % native_vector::max_elements()>();
+        return array_[idx / native_vector::max_elements()].template get<idx % native_vector::max_elements()>();
     }
 
     /*
@@ -420,9 +612,29 @@ public:
     static constexpr unsigned int max_elements() {return native_vector_count * native_vector::max_elements();}
 
     /*
+     * Returns the desired number of elements specified
+     */
+    static constexpr unsigned int specified_elements() {return desired_elements;}
+
+    /*
      * Returns the size in bits of each element
      */
     static constexpr unsigned int element_size() {return native_vector::element_size();}
+
+    /* Dumps vector to memory location (non-portable, so don't use for saving values permanently unless they're read with the same computing configuration) */
+    void dump_packed(typename native_vector::underlying_vector_type *mem)
+    {
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            array_[i].dump_packed(mem + i);
+    }
+
+    /* Reads vector from memory location (non-portable, so don't use for saving values permanently unless they're read with the same computing configuration) */
+    type &load_packed(const typename native_vector::underlying_vector_type *mem)
+    {
+        for (unsigned i = 0; i < native_vector_count; ++i)
+            array_[i].load_packed(mem + i);
+        return *this;
+    }
 
     /* Reads vector from memory location (non-portable, so don't use for saving values permanently unless they're read with the same computing configuration) */
     type &load_unpacked(const EffectiveType *array)
@@ -454,12 +666,208 @@ public:
             array_[i].dump_unpacked_aligned(array + i * native_vector::max_elements());
     }
 
+    /* Determines if aligned accesses are possible with specified pointer (depends on underlying vector's alignment requirements) */
+    static constexpr bool ptr_is_aligned(EffectiveType *ptr)
+    {
+        return native_vector::ptr_is_aligned(ptr);
+    }
+
 private:
     native_vector array_[native_vector_count];
 };
 
+template<typename T>
+class vector2 : public simd_vector<2, uint64_t, sizeof(T) * CHAR_BIT, T>
+{
+    typedef simd_vector<2, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+
+public:
+    vector2() : type() {}
+    vector2(type v) : type(v) {}
+};
+
+typedef vector2<int8_t> vector2x8;
+typedef vector2<int16_t> vector2x16;
+typedef vector2<int32_t> vector2x32;
+typedef vector2<int64_t> vector2x64;
+typedef vector2<uint8_t> vector2xu8;
+typedef vector2<uint16_t> vector2xu16;
+typedef vector2<uint32_t> vector2xu32;
+typedef vector2<uint64_t> vector2xu64;
+typedef vector2<float> vector2f;
+typedef vector2<double> vector2d;
+
+template<typename T>
+class vector3 : public simd_vector<3, uint64_t, sizeof(T) * CHAR_BIT, T>
+{
+    typedef simd_vector<3, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+
+public:
+    vector3() : type() {}
+    vector3(type v) : type(v) {}
+};
+
+typedef vector3<int8_t> vector3x8;
+typedef vector3<int16_t> vector3x16;
+typedef vector3<int32_t> vector3x32;
+typedef vector3<int64_t> vector3x64;
+typedef vector3<uint8_t> vector3xu8;
+typedef vector3<uint16_t> vector3xu16;
+typedef vector3<uint32_t> vector3xu32;
+typedef vector3<uint64_t> vector3xu64;
+typedef vector3<float> vector3f;
+typedef vector3<double> vector3d;
+
+template<typename T>
+class vector4 : public simd_vector<4, uint64_t, sizeof(T) * CHAR_BIT, T>
+{
+    typedef simd_vector<4, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+
+public:
+    vector4() : type() {}
+    vector4(type v) : type(v) {}
+};
+
+typedef vector4<int8_t> vector4x8;
+typedef vector4<int16_t> vector4x16;
+typedef vector4<int32_t> vector4x32;
+typedef vector4<int64_t> vector4x64;
+typedef vector4<uint8_t> vector4xu8;
+typedef vector4<uint16_t> vector4xu16;
+typedef vector4<uint32_t> vector4xu32;
+typedef vector4<uint64_t> vector4xu64;
+typedef vector4<float> vector4f;
+typedef vector4<double> vector4d;
+
+template<typename T>
+class vector8 : public simd_vector<8, uint64_t, sizeof(T) * CHAR_BIT, T>
+{
+    typedef simd_vector<8, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+
+public:
+    vector8() : type() {}
+    vector8(type v) : type(v) {}
+};
+
+typedef vector8<int8_t> vector8x8;
+typedef vector8<int16_t> vector8x16;
+typedef vector8<int32_t> vector8x32;
+typedef vector8<int64_t> vector8x64;
+typedef vector8<uint8_t> vector8xu8;
+typedef vector8<uint16_t> vector8xu16;
+typedef vector8<uint32_t> vector8xu32;
+typedef vector8<uint64_t> vector8xu64;
+typedef vector8<float> vector8f;
+typedef vector8<double> vector8d;
+
+template<typename T>
+class vector16 : public simd_vector<16, uint64_t, sizeof(T) * CHAR_BIT, T>
+{
+    typedef simd_vector<16, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+
+public:
+    vector16() : type() {}
+    vector16(type v) : type(v) {}
+};
+
+typedef vector16<int8_t> vector16x8;
+typedef vector16<int16_t> vector16x16;
+typedef vector16<int32_t> vector16x32;
+typedef vector16<int64_t> vector16x64;
+typedef vector16<uint8_t> vector16xu8;
+typedef vector16<uint16_t> vector16xu16;
+typedef vector16<uint32_t> vector16xu32;
+typedef vector16<uint64_t> vector16xu64;
+typedef vector16<float> vector16f;
+typedef vector16<double> vector16d;
+
+template<typename T>
+class vector32 : public simd_vector<32, uint64_t, sizeof(T) * CHAR_BIT, T>
+{
+    typedef simd_vector<32, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+
+public:
+    vector32() : type() {}
+    vector32(type v) : type(v) {}
+};
+
+typedef vector32<int8_t> vector32x8;
+typedef vector32<int16_t> vector32x16;
+typedef vector32<int32_t> vector32x32;
+typedef vector32<int64_t> vector32x64;
+typedef vector32<uint8_t> vector32xu8;
+typedef vector32<uint16_t> vector32xu16;
+typedef vector32<uint32_t> vector32xu32;
+typedef vector32<uint64_t> vector32xu64;
+typedef vector32<float> vector32f;
+typedef vector32<double> vector32d;
+
+template<typename T>
+class vector64 : public simd_vector<64, uint64_t, sizeof(T) * CHAR_BIT, T>
+{
+    typedef simd_vector<64, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+
+public:
+    vector64() : type() {}
+    vector64(type v) : type(v) {}
+};
+
+typedef vector64<int8_t> vector64x8;
+typedef vector64<int16_t> vector64x16;
+typedef vector64<int32_t> vector64x32;
+typedef vector64<int64_t> vector64x64;
+typedef vector64<uint8_t> vector64xu8;
+typedef vector64<uint16_t> vector64xu16;
+typedef vector64<uint32_t> vector64xu32;
+typedef vector64<uint64_t> vector64xu64;
+typedef vector64<float> vector64f;
+typedef vector64<double> vector64d;
+
+template<typename T>
+class vector128 : public simd_vector<128, uint64_t, sizeof(T) * CHAR_BIT, T>
+{
+    typedef simd_vector<128, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+
+public:
+    vector128() : type() {}
+    vector128(type v) : type(v) {}
+};
+
+typedef vector128<int8_t> vector128x8;
+typedef vector128<int16_t> vector128x16;
+typedef vector128<int32_t> vector128x32;
+typedef vector128<int64_t> vector128x64;
+typedef vector128<uint8_t> vector128xu8;
+typedef vector128<uint16_t> vector128xu16;
+typedef vector128<uint32_t> vector128xu32;
+typedef vector128<uint64_t> vector128xu64;
+typedef vector128<float> vector128f;
+typedef vector128<double> vector128d;
+
+template<typename T>
+class vector256 : public simd_vector<256, uint64_t, sizeof(T) * CHAR_BIT, T>
+{
+    typedef simd_vector<256, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+
+public:
+    vector256() : type() {}
+    vector256(type v) : type(v) {}
+};
+
+typedef vector256<int8_t> vector256x8;
+typedef vector256<int16_t> vector256x16;
+typedef vector256<int32_t> vector256x32;
+typedef vector256<int64_t> vector256x64;
+typedef vector256<uint8_t> vector256xu8;
+typedef vector256<uint16_t> vector256xu16;
+typedef vector256<uint32_t> vector256xu32;
+typedef vector256<uint64_t> vector256xu64;
+typedef vector256<float> vector256f;
+typedef vector256<double> vector256d;
+}
+
 template<typename T, unsigned int bits, typename EffectiveType>
-std::ostream &operator<<(std::ostream &os, native_simd_vector<T, bits, EffectiveType> vec)
+std::ostream &operator<<(std::ostream &os, cppbits::native_simd_vector<T, bits, EffectiveType> vec)
 {
     os.put('[');
     for (unsigned i = 0; i < vec.max_elements(); ++i)
