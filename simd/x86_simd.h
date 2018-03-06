@@ -27,10 +27,11 @@
 
 #include "../environment.h"
 
-#if defined CPPBITS_GCC && (defined CPPBITS_X86 || defined CPPBITS_X86_64) && defined CPPBITS_SSE
+#if (defined CPPBITS_GCC || defined CPPBITS_CLANG) && (defined CPPBITS_X86 || defined CPPBITS_X86_64) && defined CPPBITS_SSE
 #include <x86intrin.h>
 #include "generic_simd.h"
 
+namespace cppbits {
 template<unsigned int element_bits, typename EffectiveType>
 class x86_sse_vector
 {
@@ -41,6 +42,7 @@ class x86_sse_vector
 
 public:
     typedef typename impl::unsigned_int<element_bits>::type underlying_element_type;
+    typedef __m128i underlying_vector_type;
 
 private:
     static constexpr bool elements_are_floats = std::is_floating_point<EffectiveType>::value;
@@ -64,7 +66,7 @@ private:
 
     static constexpr bool effective_type_is_exact_size = (sizeof(EffectiveType) * CHAR_BIT == element_bits);
     static_assert(!elements_are_floats || (element_bits == 32 || element_bits == 64), "Floating-point element size must be 32 or 64 bits");
-    static_assert(element_bits <= 64, "Element size is too large for specified type");
+    static_assert(element_bits <= 64, "Element size is too large");
     static_assert(elements_are_floats || (sizeof(EffectiveType) * CHAR_BIT) >= element_bits, "Element size is too large for specified effective type `EffectiveType`");
 
     constexpr explicit x86_sse_vector(__m128i value) : data_(value) {}
@@ -90,42 +92,6 @@ private:
     }
 
 public:
-    enum broadcast_type
-    {
-        broadcast_none, /* Initialize entire vector with provided value */
-        broadcast_scalar, /* Single scalar value in element position 0 */
-        broadcast_all /* Broadcast value to all positions */
-    };
-
-    enum math_type
-    {
-        /* Integral math modes (When used on a floating-point vector, math_accurate is used instead) */
-        math_saturate, /* Saturating arithmetic */
-        math_keephigh, /* Keep high part of result */
-        math_keeplow, /* Rollover arithmetic, keep low part of result */
-
-        /* Floating-point math modes (When used on an integral vector, math_keeplow is used instead) */
-        math_accurate = math_keeplow, /* As accurate a result as possible */
-        math_approximate /* An approximate result is okay, if it is available and speeds things up */
-    };
-
-    enum shift_type
-    {
-        shift_natural, /* Either logical or arithmetic, depending on the effective element type */
-        shift_logical, /* Logical shift shifts in zeros */
-        shift_arithmetic /* Arithmetic shift copies the sign bit in from the left, zeros from the right */
-    };
-
-    enum compare_type
-    {
-        compare_less, /* Compare `a < b` */
-        compare_lessequal, /* Compare `a <= b` */
-        compare_greater, /* Compare `a > b` */
-        compare_greaterequal, /* Compare `a >= b` */
-        compare_equal, /* Compare `a == b` */
-        compare_nequal /* Compare `a != b` */
-    };
-
     /*
      * Default constructor zeros the vector
      */
@@ -155,7 +121,6 @@ public:
     /*
      * Returns a representation of a vector with specified value assigned to the entire vector
      */
-
     constexpr static type make_vector(__m128i value) {return type(value);}
 
     /*
@@ -278,7 +243,7 @@ public:
     /*
      * Adds all elements of `this` and returns the resulting sum
      */
-    constexpr EffectiveType horizontal_sum() const
+    EffectiveType horizontal_sum() const
     {
         CPPBITS_ERROR("Horizontal sum not implemented for x86 SIMD vectors yet");
     }
@@ -286,12 +251,12 @@ public:
     /*
      * Adds elements of `vec` to `this` (using rollover addition) and returns the result
      */
-    type operator+(x86_sse_vector vec) const {return add(vec, math_keeplow);}
+    type operator+(x86_sse_vector vec) const {return add(vec, cppbits::math_keeplow);}
 
     /*
      * Adds elements of `vec` to `this` (using specified math method) and returns the result
      */
-    type add(x86_sse_vector vec, math_type math) const
+    type add(x86_sse_vector vec, cppbits::math_type math) const
     {
         if (elements_are_floats)
         {
@@ -309,7 +274,7 @@ public:
         else
         {
             switch (math) {
-                default: /* Rollover arithmetic, math_keeplow */
+                default: /* Rollover arithmetic, cppbits::math_keeplow */
 #ifdef CPPBITS_SSE2
                     switch (element_bits) {
                         default: return type(_mm_add_epi8(data_.vector, vec.vector()));
@@ -320,22 +285,18 @@ public:
 #else
                     return make_init_values(vec, [](EffectiveType a, EffectiveType b){return a + b;});
 #endif
-                case math_saturate:
+                case cppbits::math_saturate:
                     if (elements_are_signed)
                     {
 #ifdef CPPBITS_SSE2
                         switch (element_bits) {
                             case  8: return type(_mm_adds_epi8(data_.vector, vec.vector()));
                             case 16: return type(_mm_adds_epi16(data_.vector, vec.vector()));
-
+                            default:
+                                CPPBITS_ERROR("Signed addition with saturation not implemented for x86 SSE vectors yet");
                         }
 #else
-                        return make_init_raw_values(vec, [](underlying_element_type a, underlying_element_type b)
-                        {
-                            underlying_element_type temp = a + b;
-                            if (temp < a)
-                                temp = (element_mask >> 1) + (a >> (element_bits - 1));
-                        });
+                        CPPBITS_ERROR("Signed addition with saturation not implemented for x86 SSE vectors yet");
 #endif
                     }
                     else
@@ -359,7 +320,7 @@ public:
                         });
 #endif
                     }
-                case math_keephigh: /* TODO: not yet verified as there is no builtin to keep the high part of an addition */
+                case cppbits::math_keephigh:
                 {
                     CPPBITS_ERROR("Addition using math_keephigh not implemented for x86 SIMD vectors yet");
                 }
@@ -370,12 +331,12 @@ public:
     /*
      * Subtracts elements of `vec` to `this` (using rollover subtraction) and returns the result
      */
-    type operator-(x86_sse_vector vec) const {return sub(vec, math_keeplow);}
+    type operator-(x86_sse_vector vec) const {return sub(vec, cppbits::math_keeplow);}
 
     /*
      * Subtracts elements of `vec` from `this` (using specified math method) and returns the result
      */
-    type sub(x86_sse_vector vec, math_type math) const
+    type sub(x86_sse_vector vec, cppbits::math_type math) const
     {
         if (elements_are_floats)
         {
@@ -393,7 +354,7 @@ public:
         else
         {
             switch (math) {
-                default: /* Rollover arithmetic, math_keeplow */
+                default: /* Rollover arithmetic, cppbits::math_keeplow */
 #ifdef CPPBITS_SSE2
                     switch (element_bits) {
                         default: return type(_mm_sub_epi8(data_.vector, vec.vector()));
@@ -404,16 +365,42 @@ public:
 #else
                     return make_init_values(vec, [](EffectiveType a, EffectiveType b){return a - b;});
 #endif
-                case math_saturate:
+                case cppbits::math_saturate:
                     if (elements_are_signed)
                     {
-                        CPPBITS_ERROR("Signed saturation not implemented for x86 SIMD vectors yet");
+#ifdef CPPBITS_SSE2
+                        switch (element_bits) {
+                            case  8: return type(_mm_subs_epi8(data_.vector, vec.vector()));
+                            case 16: return type(_mm_subs_epi16(data_.vector, vec.vector()));
+                            default:
+                                CPPBITS_ERROR("Signed addition with saturation not implemented for x86 SSE vectors yet");
+                        }
+#else
+                        CPPBITS_ERROR("Signed addition with saturation not implemented for x86 SSE vectors yet");
+#endif
                     }
                     else
                     {
-                        CPPBITS_ERROR("Unsigned saturation not implemented for x86 SIMD vectors yet");
+#ifdef CPPBITS_SSE2
+                        switch (element_bits) {
+                            case  8: return type(_mm_subs_epu8(data_.vector, vec.vector()));
+                            case 16: return type(_mm_subs_epu16(data_.vector, vec.vector()));
+                            default:
+                                return make_init_raw_values(vec, [](underlying_element_type a, underlying_element_type b)
+                                {
+                                    underlying_element_type temp = a - b;
+                                    return temp > a? 0: temp;
+                                });
+                        }
+#else
+                        return make_init_raw_values(vec, [](underlying_element_type a, underlying_element_type b)
+                        {
+                            underlying_element_type temp = a - b;
+                            return temp > a? 0: temp;
+                        });
+#endif
                     }
-                case math_keephigh: /* TODO: not yet verified as there is no builtin to keep the high part of an addition */
+                case cppbits::math_keephigh: /* TODO: not yet verified as there is no builtin to keep the high part of an addition */
                 {
                     CPPBITS_ERROR("Subtraction using math_keephigh not implemented for x86 SIMD vectors yet");
                 }
@@ -424,13 +411,13 @@ public:
     /*
      * Multiplies elements of `vec` by `this` (using rollover multiplication) and returns the result
      */
-    type operator*(x86_sse_vector vec) const {return mul(vec, math_keeplow);}
+    type operator*(x86_sse_vector vec) const {return mul(vec, cppbits::math_keeplow);}
 
     /*
      * Multiplies elements of `vec` by `this` (using specified math method) and returns the result
      * TODO: implement integral calculations
      */
-    type mul(x86_sse_vector vec, math_type math) const
+    type mul(x86_sse_vector vec, cppbits::math_type math) const
     {
         if (elements_are_floats)
         {
@@ -448,7 +435,7 @@ public:
         else
         {
             switch (math) {
-                default: /* Rollover arithmetic, math_keeplow */
+                default: /* Rollover arithmetic, cppbits::math_keeplow */
                     switch (element_bits) {
                         /* TODO: 8-bit multiplication is slower than naive, but much smaller code size when naive is unrolled. Is there a way to speed this up? */
 #ifdef CPPBITS_SSE2
@@ -492,16 +479,16 @@ public:
 #endif
                         case 64: return make_init_values(vec, [](EffectiveType a, EffectiveType b){return a * b;});
                     }
-                case math_saturate:
+                case cppbits::math_saturate:
                     if (elements_are_signed)
                     {
-                        CPPBITS_ERROR("Signed saturation not implemented for x86 SIMD vectors yet");
+                        CPPBITS_ERROR("Multiplication using signed saturation not implemented for x86 SIMD vectors yet");
                     }
                     else
                     {
-                        CPPBITS_ERROR("Unsigned saturation not implemented for x86 SIMD vectors yet");
+                        CPPBITS_ERROR("Multiplication using unsigned saturation not implemented for x86 SIMD vectors yet");
                     }
-                case math_keephigh: /* TODO: not yet verified as there is no builtin to keep the high part of an addition */
+                case cppbits::math_keephigh:
                 {
                     CPPBITS_ERROR("Multiplication using math_keephigh not implemented for x86 SIMD vectors yet");
                 }
@@ -512,7 +499,7 @@ public:
     /*
      * Multiplies elements of `vec` by `this` (using specified math method), adds `add`, and returns the result
      */
-    constexpr type mul_add(x86_sse_vector vec, x86_sse_vector add, math_type math) const
+    constexpr type mul_add(x86_sse_vector vec, x86_sse_vector add, cppbits::math_type math) const
     {
         return mul(vec, math).add(add, math);
     }
@@ -520,7 +507,7 @@ public:
     /*
      * Multiplies elements of `vec` by `this` (using specified math method), subtracts `sub`, and returns the result
      */
-    constexpr type mul_sub(x86_sse_vector vec, x86_sse_vector sub, math_type math) const
+    constexpr type mul_sub(x86_sse_vector vec, x86_sse_vector sub, cppbits::math_type math) const
     {
         return mul(vec, math).sub(sub, math);
     }
@@ -528,13 +515,13 @@ public:
     /*
      * Divides elements of `this` by `vec` (using rollover division) and returns the result
      */
-    type operator/(x86_sse_vector vec) const {return div(vec, math_keeplow);}
+    type operator/(x86_sse_vector vec) const {return div(vec, cppbits::math_keeplow);}
 
     /*
      * Divides elements of `this` by `vec` (using specified math method) and returns the result
      * TODO: implement integral calculations
      */
-    type div(x86_sse_vector vec, math_type math) const
+    type div(x86_sse_vector vec, cppbits::math_type math) const
     {
         if (elements_are_floats)
         {
@@ -542,7 +529,7 @@ public:
             {
                 switch (math) {
                     default: return type(_mm_div_ps((__m128) data_.vector, (__m128) vec.vector()));
-                    case math_approximate: return *this * vec.reciprocal(math);
+                    case cppbits::math_approximate: return *this * vec.reciprocal(math);
                 }
             }
             else
@@ -559,18 +546,9 @@ public:
         else
         {
             switch (math) {
-                default: /* Rollover arithmetic, math_keeplow */
+                default: /* Rollover arithmetic, cppbits::math_keeplow */
                     return make_init_values(vec, [](EffectiveType a, EffectiveType b){return a / b;});
-                case math_saturate:
-                    if (elements_are_signed)
-                    {
-                        CPPBITS_ERROR("Signed saturation not implemented for x86 SIMD vectors yet");
-                    }
-                    else
-                    {
-                        CPPBITS_ERROR("Unsigned saturation not implemented for x86 SIMD vectors yet");
-                    }
-                case math_keephigh:
+                case cppbits::math_keephigh:
                 {
                     CPPBITS_ERROR("Division using math_keephigh not implemented for x86 SIMD vectors yet");
                 }
@@ -582,9 +560,33 @@ public:
      * Computes the average of each element of `this` and `vec` as `((element of this) + (element of vec) + 1)/2` for integral values,
      * or `((element of this) + (element of vec))/2` for floating-point values
      */
-    type avg(x86_sse_vector) const
+    type avg(x86_sse_vector vec) const
     {
-        CPPBITS_ERROR("Element average not implemented for x86 SIMD vectors yet");
+        if (elements_are_floats)
+        {
+            if (element_bits == 32)
+                return type(_mm_mul_ps(_mm_add_ps((__m128) data_.vector, (__m128) vec.vector()), expand_value(0.5)));
+            else
+                return type(_mm_mul_pd(_mm_add_pd((__m128d) data_.vector, (__m128d) vec.vector()), expand_value(0.5)));
+        }
+        else
+        {
+            switch (element_bits)
+            {
+#ifdef CPPBITS_SSE2
+                default: /* 8 */ return type(_mm_avg_epu8(data_.vector, vec.vector()));
+#else
+                default: /* 8 */ return make_init_raw_values(vec, [](underlying_element_type a, underlying_element_type b) {return make_t_from_effective(make_effective_from_t(a + b + 1) / 2);});
+#endif
+#ifdef CPPBITS_SSE2
+                case 16: return type(_mm_avg_epu16(data_.vector, vec.vector()));
+#else
+                case 16: return make_init_raw_values(vec, [](underlying_element_type a, underlying_element_type b) {return make_t_from_effective(make_effective_from_t(a + b + 1) / 2);});
+#endif
+                case 32: return make_init_raw_values(vec, [](underlying_element_type a, underlying_element_type b) {return make_t_from_effective(make_effective_from_t(a + b + 1) / 2);});
+                case 64: return make_init_raw_values(vec, [](underlying_element_type a, underlying_element_type b) {return make_t_from_effective(make_effective_from_t(a + b + 1) / 2);});
+            }
+        }
     }
 
     /*
@@ -598,7 +600,7 @@ public:
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
      * TODO: support floating-point values
      */
-    constexpr type shl(unsigned int amount) const
+    type shl(unsigned int amount) const
     {
         switch (element_bits)
         {
@@ -625,19 +627,19 @@ public:
      * Shifts each element of `this` to the right by `amount` (using shift_natural behavior) and returns the resulting vector
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
      */
-    constexpr type operator>>(unsigned int amount) const {return shr(amount, shift_natural);}
+    constexpr type operator>>(unsigned int amount) const {return shr(amount, cppbits::shift_natural);}
 
     /*
      * Shifts each element of `this` to the right by `amount` (using specified shift type) and returns the resulting vector
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
      * TODO: support floating-point values
      */
-    type shr(unsigned int amount, shift_type shift) const
+    type shr(unsigned int amount, cppbits::shift_type shift) const
     {
         switch (shift) {
             default: /* shift_natural */
-                return elements_are_signed? shr(amount, shift_arithmetic): shr(amount, shift_logical);
-            case shift_logical:
+                return elements_are_signed? shr(amount, cppbits::shift_arithmetic): shr(amount, cppbits::shift_logical);
+            case cppbits::shift_logical:
                 switch (element_bits) {
                     default: /* 8 */ return make_init_raw_value([amount](underlying_element_type a) {return a >> amount;});
 #ifdef CPPBITS_SSE2
@@ -656,20 +658,20 @@ public:
                     case 64: return make_init_raw_value([amount](underlying_element_type a) {return a >> amount;});
 #endif
                 }
-            case shift_arithmetic:
+            case cppbits::shift_arithmetic:
                 switch (element_bits) {
-                    default: /* 8 */ return make_init_raw_value([amount](EffectiveType a) {return a >> amount;});
+                    default: /* 8 */ return make_init_value([amount](EffectiveType a) {return a >> amount;});
 #ifdef CPPBITS_SSE2
                     case 16: return type(_mm_srai_epi16(data_.vector, amount));
 #else
-                    case 16: return make_init_raw_value([amount](EffectiveType a) {return a >> amount;});
+                    case 16: return make_init_value([amount](EffectiveType a) {return a >> amount;});
 #endif
 #ifdef CPPBITS_SSE2
                     case 32: return type(_mm_srai_epi32(data_.vector, amount));
 #else
-                    case 32: return make_init_raw_value([amount](EffectiveType a) {return a >> amount;});
+                    case 32: return make_init_value([amount](EffectiveType a) {return a >> amount;});
 #endif
-                    case 64: return make_init_raw_value([amount](EffectiveType a) {return a >> amount;});
+                    case 64: return make_init_value([amount](EffectiveType a) {return a >> amount;});
                 }
         }
     }
@@ -749,35 +751,95 @@ public:
      * Negates elements of `this` and returns the resulting vector
      * Note that this function returns the value unmodified if EffectiveType is not a signed type
      * TODO: are floating-point values supported properly?
-     * TODO: implement integral calculations
      */
     type negate() const
     {
-        CPPBITS_ERROR("Negation not implemented for x86 SIMD vectors yet");
+        if (elements_are_floats)
+            return type(_mm_xor_ps((__m128) data_.vector, (__m128) expand_mask(element_mask ^ (element_mask >> 1), element_bits)));
+        else if (!elements_are_signed)
+            return *this;
+        else
+        {
+#ifdef CPPBITS_SSSE3
+            switch (element_bits)
+            {
+                default: return type(_mm_sign_epi8(data_.vector, max()));
+                case 16: return type(_mm_sign_epi16(data_.vector, max()));
+                case 32: return type(_mm_sign_epi32(data_.vector, max()));
+                case 64: return ~*this + make_broadcast(1);
+            }
+#else
+            return ~*this + make_broadcast(1);
+#endif
+        }
     }
 
     /*
      * Computes the absolute value of elements of `this` and returns the resulting vector
      * Note that this function returns the value unmodified if EffectiveType is not a signed type
      * TODO: are floating-point values supported properly?
-     * TODO: implement integral calculations
      */
     type abs() const
     {
-        CPPBITS_ERROR("Absolute-value not implemented for x86 SIMD vectors yet");
+        if (elements_are_floats)
+            return type(_mm_and_ps((__m128) data_.vector, (__m128) expand_mask(element_mask >> 1, element_bits)));
+        else if (!elements_are_signed)
+            return *this;
+        else
+        {
+#ifdef CPPBITS_SSSE3
+            switch (element_bits)
+            {
+                default: return type(_mm_abs_epi8(data_.vector));
+                case 16: return type(_mm_abs_epi16(data_.vector));
+                case 32: return type(_mm_abs_epi32(data_.vector));
+                case 64: return make_init_value([](EffectiveType a) {return std::abs(a);});
+            }
+#else
+            return make_init_value([](EffectiveType a) {return std::abs(a);});
+#endif
+        }
     }
 
     /*
-     * Sets each element of `this` to zero if the element is zero, or all ones otherwise, and returns the resulting vector
-     * TODO: need to implement
+     * Computes the hypotenuse length (`sqrt(x^2 + y^2)`) and returns the resulting vector
+     */
+    constexpr type hypot(x86_sse_vector vec, cppbits::math_type math) const
+    {
+        return mul_add(*this, vec.mul(vec, math), math).sqrt(math);
+    }
+
+    /*
+     * Sets each element of `this` to zero if the element is zero (sign of zero irrelevant in the case of floating-point), or all ones otherwise, and returns the resulting vector
      */
     type fill_if_nonzero() const
     {
+        if (elements_are_floats)
+        {
+            switch (element_bits)
+            {
+                default: return ~type(_mm_cmpeq_ps((__m128) data_.vector, _mm_setzero_ps()));
+                case 64: return ~type(_mm_cmpeq_pd((__m128d) data_.vector, _mm_setzero_pd()));
+            }
+        }
+        else
+        {
 #ifdef CPPBITS_SSE2
-        return ~type(_mm_cmpeq_epi32(data_.vector, _mm_setzero_si128()));
+            switch (element_bits)
+            {
+                default: return ~type(_mm_cmpeq_epi8(data_.vector, _mm_setzero_si128()));
+                case 16: return ~type(_mm_cmpeq_epi16(data_.vector, _mm_setzero_si128()));
+                case 32: return ~type(_mm_cmpeq_epi32(data_.vector, _mm_setzero_si128()));
+#ifdef CPPBITS_SSE4_1
+                case 64: return ~type(_mm_cmpeq_epi64(data_.vector, _mm_setzero_si128()));
 #else
-        return make_init_raw_value([](underlying_element_type a) {return (a != 0) * element_mask;});
+                case 64: return make_init_raw_value([](underlying_element_type a) {return (a != 0) * element_mask;});
 #endif
+            }
+#else
+            return make_init_raw_value([](underlying_element_type a) {return (a != 0) * element_mask;});
+#endif
+        }
     }
 
     /*
@@ -902,7 +964,7 @@ public:
      * Compares `this` to `vec`. If the comparison result is true, the corresponding element is set to all 1's
      * Otherwise, if the comparison result is false, the corresponding element is set to all 0's
      */
-    type cmp(x86_sse_vector vec, compare_type compare) const
+    type cmp(x86_sse_vector vec, cppbits::compare_type compare) const
     {
         if (elements_are_floats)
         {
@@ -910,11 +972,11 @@ public:
             {
                 switch (compare) {
                     default: return type(_mm_cmpeq_ps((__m128) data_.vector, (__m128) vec.vector()));
-                    case compare_nequal: return type(_mm_cmpneq_ps((__m128) data_.vector, (__m128) vec.vector()));
-                    case compare_less: return type(_mm_cmplt_ps((__m128) data_.vector, (__m128) vec.vector()));
-                    case compare_lessequal: return type(_mm_cmple_ps((__m128) data_.vector, (__m128) vec.vector()));
-                    case compare_greater: return type(_mm_cmple_ps((__m128) vec.vector(), (__m128) data_.vector));
-                    case compare_greaterequal: return type(_mm_cmplt_ps((__m128) vec.vector(), (__m128) data_.vector));
+                    case cppbits::compare_nequal: return type(_mm_cmpneq_ps((__m128) data_.vector, (__m128) vec.vector()));
+                    case cppbits::compare_less: return type(_mm_cmplt_ps((__m128) data_.vector, (__m128) vec.vector()));
+                    case cppbits::compare_lessequal: return type(_mm_cmple_ps((__m128) data_.vector, (__m128) vec.vector()));
+                    case cppbits::compare_greater: return type(_mm_cmple_ps((__m128) vec.vector(), (__m128) data_.vector));
+                    case cppbits::compare_greaterequal: return type(_mm_cmplt_ps((__m128) vec.vector(), (__m128) data_.vector));
                 }
             }
             else // element_bits == 64
@@ -922,20 +984,20 @@ public:
 #ifdef CPPBITS_SSE2
                 switch (compare) {
                     default: return type(_mm_cmpeq_pd((__m128d) data_.vector, (__m128d) vec.vector()));
-                    case compare_nequal: return type(_mm_cmpneq_pd((__m128d) data_.vector, (__m128d) vec.vector()));
-                    case compare_less: return type(_mm_cmplt_pd((__m128d) data_.vector, (__m128d) vec.vector()));
-                    case compare_lessequal: return type(_mm_cmple_pd((__m128d) data_.vector, (__m128d) vec.vector()));
-                    case compare_greater: return type(_mm_cmple_pd((__m128d) vec.vector(), (__m128d) data_.vector));
-                    case compare_greaterequal: return type(_mm_cmplt_pd((__m128d) vec.vector(), (__m128d) data_.vector));
+                    case cppbits::compare_nequal: return type(_mm_cmpneq_pd((__m128d) data_.vector, (__m128d) vec.vector()));
+                    case cppbits::compare_less: return type(_mm_cmplt_pd((__m128d) data_.vector, (__m128d) vec.vector()));
+                    case cppbits::compare_lessequal: return type(_mm_cmple_pd((__m128d) data_.vector, (__m128d) vec.vector()));
+                    case cppbits::compare_greater: return type(_mm_cmple_pd((__m128d) vec.vector(), (__m128d) data_.vector));
+                    case cppbits::compare_greaterequal: return type(_mm_cmplt_pd((__m128d) vec.vector(), (__m128d) data_.vector));
                 }
 #else
                 switch (compare) {
                     default: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a == b;});
-                    case compare_nequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a != b;});
-                    case compare_less: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a < b;});
-                    case compare_lessequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a <= b;});
-                    case compare_greater: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a > b;});
-                    case compare_greaterequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a >= b;});
+                    case cppbits::compare_nequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a != b;});
+                    case cppbits::compare_less: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a < b;});
+                    case cppbits::compare_lessequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a <= b;});
+                    case cppbits::compare_greater: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a > b;});
+                    case cppbits::compare_greaterequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a >= b;});
                 }
 #endif
             }
@@ -949,48 +1011,48 @@ public:
                     default: /* 8 */
                         switch (compare) {
                             default: return type(_mm_cmpeq_epi8(data_.vector, vec.vector()));
-                            case compare_nequal: return ~type(_mm_cmpeq_epi8(data_.vector, vec.vector()));
-                            case compare_less: return type(_mm_cmpgt_epi8(vec.vector(), data_.vector));
-                            case compare_lessequal: return type(_mm_or_si128(_mm_cmpgt_epi8(vec.vector(), data_.vector), _mm_cmpeq_epi8(data_.vector, vec.vector())));
-                            case compare_greater: return type(_mm_cmpgt_epi8(data_.vector, vec.vector()));
-                            case compare_greaterequal: return type(_mm_or_si128(_mm_cmpgt_epi8(data_.vector, vec.vector()), _mm_cmpeq_epi8(data_.vector, vec.vector())));
+                            case cppbits::compare_nequal: return ~type(_mm_cmpeq_epi8(data_.vector, vec.vector()));
+                            case cppbits::compare_less: return type(_mm_cmpgt_epi8(vec.vector(), data_.vector));
+                            case cppbits::compare_lessequal: return type(_mm_or_si128(_mm_cmpgt_epi8(vec.vector(), data_.vector), _mm_cmpeq_epi8(data_.vector, vec.vector())));
+                            case cppbits::compare_greater: return type(_mm_cmpgt_epi8(data_.vector, vec.vector()));
+                            case cppbits::compare_greaterequal: return type(_mm_or_si128(_mm_cmpgt_epi8(data_.vector, vec.vector()), _mm_cmpeq_epi8(data_.vector, vec.vector())));
                         }
                     case 16:
                         switch (compare) {
                             default: return type(_mm_cmpeq_epi16(data_.vector, vec.vector()));
-                            case compare_nequal: return ~type(_mm_cmpeq_epi16(data_.vector, vec.vector()));
-                            case compare_less: return type(_mm_cmpgt_epi16(vec.vector(), data_.vector));
-                            case compare_lessequal: return type(_mm_or_si128(_mm_cmpgt_epi16(vec.vector(), data_.vector), _mm_cmpeq_epi16(data_.vector, vec.vector())));
-                            case compare_greater: return type(_mm_cmpgt_epi16(data_.vector, vec.vector()));
-                            case compare_greaterequal: return type(_mm_or_si128(_mm_cmpgt_epi16(data_.vector, vec.vector()), _mm_cmpeq_epi16(data_.vector, vec.vector())));
+                            case cppbits::compare_nequal: return ~type(_mm_cmpeq_epi16(data_.vector, vec.vector()));
+                            case cppbits::compare_less: return type(_mm_cmpgt_epi16(vec.vector(), data_.vector));
+                            case cppbits::compare_lessequal: return type(_mm_or_si128(_mm_cmpgt_epi16(vec.vector(), data_.vector), _mm_cmpeq_epi16(data_.vector, vec.vector())));
+                            case cppbits::compare_greater: return type(_mm_cmpgt_epi16(data_.vector, vec.vector()));
+                            case cppbits::compare_greaterequal: return type(_mm_or_si128(_mm_cmpgt_epi16(data_.vector, vec.vector()), _mm_cmpeq_epi16(data_.vector, vec.vector())));
                         }
                     case 32:
                         switch (compare) {
                             default: return type(_mm_cmpeq_epi32(data_.vector, vec.vector()));
-                            case compare_nequal: return ~type(_mm_cmpeq_epi32(data_.vector, vec.vector()));
-                            case compare_less: return type(_mm_cmpgt_epi32(vec.vector(), data_.vector));
-                            case compare_lessequal: return type(_mm_or_si128(_mm_cmpgt_epi32(vec.vector(), data_.vector), _mm_cmpeq_epi32(data_.vector, vec.vector())));
-                            case compare_greater: return type(_mm_cmpgt_epi32(data_.vector, vec.vector()));
-                            case compare_greaterequal: return type(_mm_or_si128(_mm_cmpgt_epi32(data_.vector, vec.vector()), _mm_cmpeq_epi32(data_.vector, vec.vector())));
+                            case cppbits::compare_nequal: return ~type(_mm_cmpeq_epi32(data_.vector, vec.vector()));
+                            case cppbits::compare_less: return type(_mm_cmpgt_epi32(vec.vector(), data_.vector));
+                            case cppbits::compare_lessequal: return type(_mm_or_si128(_mm_cmpgt_epi32(vec.vector(), data_.vector), _mm_cmpeq_epi32(data_.vector, vec.vector())));
+                            case cppbits::compare_greater: return type(_mm_cmpgt_epi32(data_.vector, vec.vector()));
+                            case cppbits::compare_greaterequal: return type(_mm_or_si128(_mm_cmpgt_epi32(data_.vector, vec.vector()), _mm_cmpeq_epi32(data_.vector, vec.vector())));
                         }
                     case 64:
 #ifdef CPPBITS_SSE4_1
                         switch (compare) {
                             default: return type(_mm_cmpeq_epi64(data_.vector, vec.vector()));
-                            case compare_nequal: return ~type(_mm_cmpeq_epi64(data_.vector, vec.vector()));
-                            case compare_less: return type(_mm_cmpgt_epi64(vec.vector(), data_.vector));
-                            case compare_lessequal: return type(_mm_or_si128(_mm_cmpgt_epi64(vec.vector(), data_.vector), _mm_cmpeq_epi64(data_.vector, vec.vector())));
-                            case compare_greater: return type(_mm_cmpgt_epi64(data_.vector, vec.vector()));
-                            case compare_greaterequal: return type(_mm_or_si128(_mm_cmpgt_epi64(data_.vector, vec.vector()), _mm_cmpeq_epi64(data_.vector, vec.vector())));
+                            case cppbits::compare_nequal: return ~type(_mm_cmpeq_epi64(data_.vector, vec.vector()));
+                            case cppbits::compare_less: return type(_mm_cmpgt_epi64(vec.vector(), data_.vector));
+                            case cppbits::compare_lessequal: return type(_mm_or_si128(_mm_cmpgt_epi64(vec.vector(), data_.vector), _mm_cmpeq_epi64(data_.vector, vec.vector())));
+                            case cppbits::compare_greater: return type(_mm_cmpgt_epi64(data_.vector, vec.vector()));
+                            case cppbits::compare_greaterequal: return type(_mm_or_si128(_mm_cmpgt_epi64(data_.vector, vec.vector()), _mm_cmpeq_epi64(data_.vector, vec.vector())));
                         }
 #else
                         switch (compare) {
                             default: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a == b;});
-                            case compare_nequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a != b;});
-                            case compare_less: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a < b;});
-                            case compare_lessequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a <= b;});
-                            case compare_greater: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a > b;});
-                            case compare_greaterequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a >= b;});
+                            case cppbits::compare_nequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a != b;});
+                            case cppbits::compare_less: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a < b;});
+                            case cppbits::compare_lessequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a <= b;});
+                            case cppbits::compare_greater: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a > b;});
+                            case cppbits::compare_greaterequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a >= b;});
                         }
 #endif
                 }
@@ -1001,23 +1063,23 @@ public:
                     default: /* 8 */
                         switch (compare) {
                             default: return type(_mm_cmpeq_epi8(data_.vector, vec.vector()));
-                            case compare_nequal: return ~type(_mm_cmpeq_epi8(data_.vector, vec.vector()));
-                            case compare_less:
+                            case cppbits::compare_nequal: return ~type(_mm_cmpeq_epi8(data_.vector, vec.vector()));
+                            case cppbits::compare_less:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_cmpgt_epi8(_mm_xor_si128(vec.vector(), mask), _mm_xor_si128(data_.vector, mask)));
                             }
-                            case compare_lessequal:
+                            case cppbits::compare_lessequal:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_or_si128(_mm_cmpgt_epi8(_mm_xor_si128(vec.vector(), mask), _mm_xor_si128(data_.vector, mask)), _mm_cmpeq_epi8(data_.vector, vec.vector())));
                             }
-                            case compare_greater:
+                            case cppbits::compare_greater:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_cmpgt_epi8(_mm_xor_si128(data_.vector, mask), _mm_xor_si128(vec.vector(), mask)));
                             }
-                            case compare_greaterequal:
+                            case cppbits::compare_greaterequal:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_or_si128(_mm_cmpgt_epi8(_mm_xor_si128(data_.vector, mask), _mm_xor_si128(vec.vector(), mask)), _mm_cmpeq_epi8(data_.vector, vec.vector())));
@@ -1026,23 +1088,23 @@ public:
                     case 16:
                         switch (compare) {
                             default: return type(_mm_cmpeq_epi16(data_.vector, vec.vector()));
-                            case compare_nequal: return ~type(_mm_cmpeq_epi16(data_.vector, vec.vector()));
-                            case compare_less:
+                            case cppbits::compare_nequal: return ~type(_mm_cmpeq_epi16(data_.vector, vec.vector()));
+                            case cppbits::compare_less:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_cmpgt_epi16(_mm_xor_si128(vec.vector(), mask), _mm_xor_si128(data_.vector, mask)));
                             }
-                            case compare_lessequal:
+                            case cppbits::compare_lessequal:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_or_si128(_mm_cmpgt_epi16(_mm_xor_si128(vec.vector(), mask), _mm_xor_si128(data_.vector, mask)), _mm_cmpeq_epi16(data_.vector, vec.vector())));
                             }
-                            case compare_greater:
+                            case cppbits::compare_greater:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_cmpgt_epi16(_mm_xor_si128(data_.vector, mask), _mm_xor_si128(vec.vector(), mask)));
                             }
-                            case compare_greaterequal:
+                            case cppbits::compare_greaterequal:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_or_si128(_mm_cmpgt_epi16(_mm_xor_si128(data_.vector, mask), _mm_xor_si128(vec.vector(), mask)), _mm_cmpeq_epi16(data_.vector, vec.vector())));
@@ -1051,23 +1113,23 @@ public:
                     case 32:
                         switch (compare) {
                             default: return type(_mm_cmpeq_epi32(data_.vector, vec.vector()));
-                            case compare_nequal: return ~type(_mm_cmpeq_epi32(data_.vector, vec.vector()));
-                            case compare_less:
+                            case cppbits::compare_nequal: return ~type(_mm_cmpeq_epi32(data_.vector, vec.vector()));
+                            case cppbits::compare_less:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_cmpgt_epi32(_mm_xor_si128(vec.vector(), mask), _mm_xor_si128(data_.vector, mask)));
                             }
-                            case compare_lessequal:
+                            case cppbits::compare_lessequal:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_or_si128(_mm_cmpgt_epi32(_mm_xor_si128(vec.vector(), mask), _mm_xor_si128(data_.vector, mask)), _mm_cmpeq_epi32(data_.vector, vec.vector())));
                             }
-                            case compare_greater:
+                            case cppbits::compare_greater:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_cmpgt_epi32(_mm_xor_si128(data_.vector, mask), _mm_xor_si128(vec.vector(), mask)));
                             }
-                            case compare_greaterequal:
+                            case cppbits::compare_greaterequal:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_or_si128(_mm_cmpgt_epi32(_mm_xor_si128(data_.vector, mask), _mm_xor_si128(vec.vector(), mask)), _mm_cmpeq_epi32(data_.vector, vec.vector())));
@@ -1077,23 +1139,23 @@ public:
 #ifdef CPPBITS_SSE4_1
                         switch (compare) {
                             default: return type(_mm_cmpeq_epi64(data_.vector, vec.vector()));
-                            case compare_nequal: return ~type(_mm_cmpeq_epi64(data_.vector, vec.vector()));
-                            case compare_less:
+                            case cppbits::compare_nequal: return ~type(_mm_cmpeq_epi64(data_.vector, vec.vector()));
+                            case cppbits::compare_less:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_cmpgt_epi64(_mm_xor_si128(vec.vector(), mask), _mm_xor_si128(data_.vector, mask)));
                             }
-                            case compare_lessequal:
+                            case cppbits::compare_lessequal:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_or_si128(_mm_cmpgt_epi64(_mm_xor_si128(vec.vector(), mask), _mm_xor_si128(data_.vector, mask)), _mm_cmpeq_epi64(data_.vector, vec.vector())));
                             }
-                            case compare_greater:
+                            case cppbits::compare_greater:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_cmpgt_epi64(_mm_xor_si128(data_.vector, mask), _mm_xor_si128(vec.vector(), mask)));
                             }
-                            case compare_greaterequal:
+                            case cppbits::compare_greaterequal:
                             {
                                 const __m128i mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits);
                                 return type(_mm_or_si128(_mm_cmpgt_epi64(_mm_xor_si128(data_.vector, mask), _mm_xor_si128(vec.vector(), mask)), _mm_cmpeq_epi64(data_.vector, vec.vector())));
@@ -1102,11 +1164,11 @@ public:
 #else
                         switch (compare) {
                             default: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a == b;});
-                            case compare_nequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a != b;});
-                            case compare_less: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a < b;});
-                            case compare_lessequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a <= b;});
-                            case compare_greater: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a > b;});
-                            case compare_greaterequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a >= b;});
+                            case cppbits::compare_nequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a != b;});
+                            case cppbits::compare_less: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a < b;});
+                            case cppbits::compare_lessequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a <= b;});
+                            case cppbits::compare_greater: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a > b;});
+                            case cppbits::compare_greaterequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a >= b;});
                         }
 #endif
                 }
@@ -1114,28 +1176,27 @@ public:
 #else
             switch (compare) {
                 default: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a == b;});
-                case compare_nequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a != b;});
-                case compare_less: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a < b;});
-                case compare_lessequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a <= b;});
-                case compare_greater: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a > b;});
-                case compare_greaterequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a >= b;});
+                case cppbits::compare_nequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a != b;});
+                case cppbits::compare_less: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a < b;});
+                case cppbits::compare_lessequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a <= b;});
+                case cppbits::compare_greater: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a > b;});
+                case cppbits::compare_greaterequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a >= b;});
             }
 #endif
         }
     }
 
-    type operator==(x86_sse_vector vec) const {return cmp(vec, compare_equal);}
-    type operator!=(x86_sse_vector vec) const {return cmp(vec, compare_nequal);}
-    type operator<(x86_sse_vector vec) const {return cmp(vec, compare_less);}
-    type operator<=(x86_sse_vector vec) const {return cmp(vec, compare_lessequal);}
-    type operator>(x86_sse_vector vec) const {return cmp(vec, compare_greater);}
-    type operator>=(x86_sse_vector vec) const {return cmp(vec, compare_greaterequal);}
+    type operator==(x86_sse_vector vec) const {return cmp(vec, cppbits::compare_equal);}
+    type operator!=(x86_sse_vector vec) const {return cmp(vec, cppbits::compare_nequal);}
+    type operator<(x86_sse_vector vec) const {return cmp(vec, cppbits::compare_less);}
+    type operator<=(x86_sse_vector vec) const {return cmp(vec, cppbits::compare_lessequal);}
+    type operator>(x86_sse_vector vec) const {return cmp(vec, cppbits::compare_greater);}
+    type operator>=(x86_sse_vector vec) const {return cmp(vec, cppbits::compare_greaterequal);}
 
     /*
      * Sets each element in output to reciprocal of respective element in `this`
-     * TODO: doesn't work properly for integral values
      */
-    type reciprocal(math_type math) const
+    type reciprocal(cppbits::math_type math) const
     {
         if (elements_are_floats)
         {
@@ -1143,7 +1204,7 @@ public:
             {
                 switch (math) {
                     default: return make_broadcast(1.0) / *this;
-                    case math_approximate: return type(_mm_rcp_ps((__m128) data_.vector));
+                    case cppbits::math_approximate: return type(_mm_rcp_ps((__m128) data_.vector));
                 }
             }
             else
@@ -1158,9 +1219,8 @@ public:
 
     /*
      * Sets each element in output to square-root of respective element in `this`
-     * TODO: doesn't work properly for integral values
      */
-    type sqrt(math_type) const
+    type sqrt(cppbits::math_type) const
     {
         if (elements_are_floats)
         {
@@ -1182,9 +1242,8 @@ public:
 
     /*
      * Sets each element in output to reciprocal of square-root of respective element in `this`
-     * TODO: doesn't work properly for integral values
      */
-    type rsqrt(math_type math) const
+    type rsqrt(cppbits::math_type math) const
     {
         if (elements_are_floats)
         {
@@ -1192,7 +1251,7 @@ public:
             {
                 switch (math) {
                     default: return sqrt(math).reciprocal(math);
-                    case math_approximate: return type(_mm_rsqrt_ps((__m128) data_.vector));
+                    case cppbits::math_approximate: return type(_mm_rsqrt_ps((__m128) data_.vector));
                 }
             }
             else
@@ -1225,7 +1284,48 @@ public:
         }
         else
         {
-            CPPBITS_ERROR("Integral max not implemented for x86 SIMD vectors yet");
+            if (elements_are_signed)
+            {
+                switch (element_bits) {
+#ifdef CPPBITS_SSE4_1
+                    default: /* 8 */ return type(_mm_max_epi8(data_.vector, vec.vector()));
+#else
+                    default: /* 8 */ return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return max(a, b);});
+#endif
+#ifdef CPPBITS_SSE2
+                    case 16: return type(_mm_max_epi16(data_.vector, vec.vector()));
+#else
+                    case 16: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return max(a, b);});
+#endif
+#ifdef CPPBITS_SSE4_1
+                    case 32: return type(_mm_max_epi32(data_.vector, vec.vector()));
+#else
+                    case 32: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return max(a, b);});
+#endif
+                    case 64: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return max(a, b);});
+                }
+            }
+            else // elements are unsigned
+            {
+                switch (element_bits) {
+#ifdef CPPBITS_SSE2
+                    default: /* 8 */ return type(_mm_max_epu8(data_.vector, vec.vector()));
+#else
+                    default: /* 8 */ return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return max(a, b);});
+#endif
+#ifdef CPPBITS_SSE4_1
+                    case 16: return type(_mm_max_epu16(data_.vector, vec.vector()));
+#else
+                    case 16: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return max(a, b);});
+#endif
+#ifdef CPPBITS_SSE4_1
+                    case 32: return type(_mm_max_epu32(data_.vector, vec.vector()));
+#else
+                    case 32: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return max(a, b);});
+#endif
+                    case 64: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return max(a, b);});
+                }
+            }
         }
     }
 
@@ -1249,7 +1349,48 @@ public:
         }
         else
         {
-            CPPBITS_ERROR("Integral min not implemented for x86 SIMD vectors yet");
+            if (elements_are_signed)
+            {
+                switch (element_bits) {
+#ifdef CPPBITS_SSE4_1
+                    default: /* 8 */ return type(_mm_min_epi8(data_.vector, vec.vector()));
+#else
+                    default: /* 8 */ return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return min(a, b);});
+#endif
+#ifdef CPPBITS_SSE2
+                    case 16: return type(_mm_min_epi16(data_.vector, vec.vector()));
+#else
+                    case 16: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return min(a, b);});
+#endif
+#ifdef CPPBITS_SSE4_1
+                    case 32: return type(_mm_min_epi32(data_.vector, vec.vector()));
+#else
+                    case 32: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return min(a, b);});
+#endif
+                    case 64: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return min(a, b);});
+                }
+            }
+            else // elements are unsigned
+            {
+                switch (element_bits) {
+#ifdef CPPBITS_SSE2
+                    default: /* 8 */ return type(_mm_min_epu8(data_.vector, vec.vector()));
+#else
+                    default: /* 8 */ return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return min(a, b);});
+#endif
+#ifdef CPPBITS_SSE4_1
+                    case 16: return type(_mm_min_epu16(data_.vector, vec.vector()));
+#else
+                    case 16: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return min(a, b);});
+#endif
+#ifdef CPPBITS_SSE4_1
+                    case 32: return type(_mm_min_epu32(data_.vector, vec.vector()));
+#else
+                    case 32: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return min(a, b);});
+#endif
+                    case 64: return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return min(a, b);});
+                }
+            }
         }
     }
 
@@ -1508,6 +1649,13 @@ public:
         return *this;
     }
 
+    /* Determines if aligned accesses are possible with specified pointer (returns true if aligned to 16-byte boundary) */
+    static bool ptr_is_aligned(EffectiveType *ptr)
+    {
+        uintptr_t addr = reinterpret_cast<uintptr_t>(static_cast<void *>(ptr));
+        return (addr & (alignment - 1)) == 0;
+    }
+
 private:
     // Lambda should be a functor taking an EffectiveType and returning an EffectiveType value
     template<typename Lambda>
@@ -1653,9 +1801,10 @@ struct native_simd_vector<T, 64, EffectiveType> : public x86_sse_vector<64, Effe
         : x86_sse_vector<64, EffectiveType>(v)
     {}
 };
+}
 
 template<unsigned int bits, typename EffectiveType>
-std::ostream &operator<<(std::ostream &os, x86_sse_vector<bits, EffectiveType> vec)
+std::ostream &operator<<(std::ostream &os, cppbits::x86_sse_vector<bits, EffectiveType> vec)
 {
     os.put('[');
     for (unsigned i = 0; i < vec.max_elements(); ++i)
@@ -1668,7 +1817,7 @@ std::ostream &operator<<(std::ostream &os, x86_sse_vector<bits, EffectiveType> v
 }
 
 template<typename EffectiveType>
-std::ostream &operator<<(std::ostream &os, x86_sse_vector<8, EffectiveType> vec)
+std::ostream &operator<<(std::ostream &os, cppbits::x86_sse_vector<8, EffectiveType> vec)
 {
     os.put('[');
     for (unsigned i = 0; i < vec.max_elements(); ++i)

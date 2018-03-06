@@ -1,5 +1,5 @@
 /*
- * generic_simd.h
+ * opencl_simd.h
  *
  * Copyright © 2018 Oliver Adams
  *
@@ -22,60 +22,40 @@
  * IN THE SOFTWARE.
  */
 
-#ifndef GENERIC_SIMD_H
-#define GENERIC_SIMD_H
+#ifndef OPENCL_SIMD_H
+#define OPENCL_SIMD_H
 
-#include "../fp_convert.h"
-#include "../bitfield.h"
 #include "../environment.h"
+#include "CL/cl.hpp"
 #include <limits.h>
 
 namespace cppbits {
-template<typename T, unsigned int element_bits, typename EffectiveType>
-struct native_simd_vector;
-
-template<typename T, unsigned int element_bits, typename EffectiveType>
-class generic_simd_vector
-{
+template<unsigned int desired_elements, unsigned int element_bits, typename EffectiveType>
+class opencl_simd_vector {
     static_assert(std::is_unsigned<T>::value, "T must be an unsigned integral type");
     static_assert(element_bits, "Number of bits per element must be greater than zero");
 
-    static constexpr unsigned int vector_digits = std::numeric_limits<T>::digits;
+    static constexpr unsigned int vector_digits = desired_elements * element_bits;
     static constexpr bool elements_are_floats = std::is_floating_point<EffectiveType>::value;
     static constexpr bool elements_are_signed = std::is_signed<EffectiveType>::value && !elements_are_floats;
-    typedef generic_simd_vector<T, element_bits, EffectiveType> type;
-    typedef T value_type;
-    static constexpr T ones = -1;
+    typedef opencl_simd_vector<desired_elements, element_bits, EffectiveType> type;
+
+public:
+    typedef typename impl::unsigned_int<element_bits>::type underlying_element_type;
+    typedef cl::Buffer underlying_vector_type;
+
+private:
+    static constexpr underlying_element_type ones = -1;
     static constexpr unsigned int elements = vector_digits / element_bits;
-    static constexpr T mask = ones >> (vector_digits % element_bits);
-    static constexpr T element_mask = ones >> (vector_digits - element_bits);
+    static constexpr underlying_element_type element_mask = ones >> (std::numeric_limits<underlying_element_type>::digits - element_bits);
 
     static constexpr bool effective_type_is_exact_size = sizeof(EffectiveType) * CHAR_BIT == element_bits;
     static_assert(!elements_are_floats || (element_bits == 32 || element_bits == 64), "Floating-point element size must be 32 or 64 bits");
-    static_assert(elements, "Element size is too large for specified underlying type `T`");
+    static_assert(element_bits <= 64, "Element size is too large");
     static_assert(elements_are_floats || (sizeof(EffectiveType) * CHAR_BIT) >= element_bits, "Element size is too large for specified effective type `EffectiveType`");
 
-    constexpr explicit generic_simd_vector(T value) : data_(value) {}
+    constexpr explicit opencl_simd_vector(T value) : data_(value) {}
 
-#if defined CPPBITS_X86 || defined CPPBITS_X86_64
-    constexpr static T make_t_from_effective(EffectiveType v)
-    {
-        return elements_are_floats? element_bits == 32? T(float_cast_to_ieee_754(v)): T(double_cast_to_ieee_754(v)): T(v);
-    }
-    static EffectiveType make_effective_from_t(T v)
-    {
-        if (elements_are_floats)
-            return element_bits == 32? EffectiveType(float_cast_from_ieee_754(v)):
-                                       EffectiveType(double_cast_from_ieee_754(v));
-        else if (elements_are_signed)
-        {
-            const T val = v & (element_mask >> 1);
-            const T negative = v >> (element_bits - 1);
-            return negative? val == 0? scalar_min(): -EffectiveType((~val + 1) & (element_mask >> 1)): EffectiveType(val);
-        }
-        return EffectiveType(v);
-    }
-#else
     constexpr static T make_t_from_effective(EffectiveType v)
     {
         return elements_are_floats? element_bits == 32? T(float_to_ieee_754(v)): T(double_to_ieee_754(v)): T(v);
@@ -93,16 +73,21 @@ class generic_simd_vector
         }
         return EffectiveType(v);
     }
-#endif
 
 public:
-    typedef T underlying_element_type;
-    typedef T underlying_vector_type;
-
     /*
      * Default constructor zeros the vector
      */
-    constexpr generic_simd_vector() : data_{} {}
+    constexpr opencl_simd_vector() : data_{}, ctx_(CL_DEVICE_TYPE_ALL), buf_(ctx_, CL_MEM_USE_HOST_PTR, vector_digits / 8, data_) {}
+
+    /*
+     * Copy constructor copies the data and context, initializes new buffer
+     */
+    constexpr opencl_simd_vector(const opencl_simd_vector &other)
+        : data_{}
+        , ctx_(other.ctx_)
+        , buf_(ctx_, CL_MEM_USE_HOST_PTR, vector_digits / 8, data_)
+    {}
 
     /*
      * Returns a new representation of the vector, casted to a different type.
@@ -995,7 +980,9 @@ private:
         return level == 0? EffectiveType(0): EffectiveType(type(vector).get(level-1) + horizontal_sum_helper(vector, level-1));
     }
 
-    T data_;
+    underlying_element_type data_[desired_elements];
+    underlying_vector_type buf_;
+    cl::Context ctx_;
 };
 
 template<typename T, unsigned int element_bits, typename EffectiveType>
@@ -1008,17 +995,4 @@ struct native_simd_vector : public generic_simd_vector<T, element_bits, Effectiv
 };
 }
 
-template<typename T, unsigned int bits, typename EffectiveType>
-std::ostream &operator<<(std::ostream &os, cppbits::generic_simd_vector<T, bits, EffectiveType> vec)
-{
-    os.put('[');
-    for (unsigned i = 0; i < vec.max_elements(); ++i)
-    {
-        if (i != 0)
-            os.put(' ');
-        os << vec.get(i);
-    }
-    return os.put(']');
-}
-
-#endif // GENERIC_SIMD_H
+#endif // OPENCL_SIMD_H
