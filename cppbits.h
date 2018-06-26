@@ -27,7 +27,7 @@
 
 #include "simd/generic_simd.h"
 #include "simd/x86_simd.h"
-//#include "simd/opencl_simd.h"
+#include "simd/opencl_simd.h"
 
 namespace cppbits {
 template<unsigned int desired_elements, template<typename, unsigned int, typename> class native_vector_type, typename T, unsigned int element_bits, typename EffectiveType>
