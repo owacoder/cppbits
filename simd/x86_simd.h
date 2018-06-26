@@ -125,7 +125,6 @@ public:
 
     /*
      * Returns a representation of a vector with specified value assigned to element 0
-     * TODO: support 8, 16, 64 bit element sizes
      */
     static type make_scalar(EffectiveType value)
     {
@@ -1394,6 +1393,21 @@ public:
         }
     }
 
+    template<shuffle_type map>
+    type shuffle() const
+    {
+        if (elements == 4)
+            return type(_mm_shuffle_epi32(data_, map));
+        else
+        {
+            type result;
+            uint64_t shuf = static_cast<uint64_t>(map);
+            for (unsigned int i = 0; i < elements; ++i, shuf /= elements)
+                result.data_.store[i] = data_.store[shuf & (elements - 1)];
+            return result;
+        }
+    }
+
     /*
      * Sets element `idx` to `value`
      */
@@ -1764,6 +1778,45 @@ private:
     }
 
     packed_union data_;
+};
+
+template<typename T, unsigned int bits, typename EffectiveType>
+struct x86_simd_vector;
+
+template<typename T, typename EffectiveType>
+struct x86_simd_vector<T, 8, EffectiveType> : public x86_sse_vector<8, EffectiveType>
+{
+    x86_simd_vector() {}
+    x86_simd_vector(x86_sse_vector<8, EffectiveType> v)
+        : x86_sse_vector<8, EffectiveType>(v)
+    {}
+};
+
+template<typename T, typename EffectiveType>
+struct x86_simd_vector<T, 16, EffectiveType> : public x86_sse_vector<16, EffectiveType>
+{
+    x86_simd_vector() {}
+    x86_simd_vector(x86_sse_vector<16, EffectiveType> v)
+        : x86_sse_vector<16, EffectiveType>(v)
+    {}
+};
+
+template<typename T, typename EffectiveType>
+struct x86_simd_vector<T, 32, EffectiveType> : public x86_sse_vector<32, EffectiveType>
+{
+    x86_simd_vector() {}
+    x86_simd_vector(x86_sse_vector<32, EffectiveType> v)
+        : x86_sse_vector<32, EffectiveType>(v)
+    {}
+};
+
+template<typename T, typename EffectiveType>
+struct x86_simd_vector<T, 64, EffectiveType> : public x86_sse_vector<64, EffectiveType>
+{
+    x86_simd_vector() {}
+    x86_simd_vector(x86_sse_vector<64, EffectiveType> v)
+        : x86_sse_vector<64, EffectiveType>(v)
+    {}
 };
 
 template<typename T, typename EffectiveType>

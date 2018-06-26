@@ -27,12 +27,204 @@
 
 #include "../environment.h"
 #include "CL/cl.hpp"
+
+#include <array>
+#include <vector>
 #include <limits.h>
+
+template<typename ElementType, bool is_floating_point, bool is_signed>
+class opencl_compile
+{
+    cl::Program prog_;
+    cl::Context ctx_;
+    cl::CommandQueue queue_;
+    std::vector<cl::Kernel> kernels_;
+
+    static constexpr const char *type = impl::type_name<ElementType, is_signed>::value;
+    static constexpr const char *double_type = impl::double_type_name<ElementType, is_signed>::value;
+
+public:
+    opencl_compile() {init();}
+
+    cl::Context &context() {return ctx_;}
+    cl::CommandQueue &queue() {return queue_;}
+    cl::Kernel &kernel(size_t number) {return kernels_[number];}
+
+private:
+    void init()
+    {
+        cl::Platform platform;
+        std::vector<cl::Device> devices;
+
+        platform.getDevices(CL_DEVICE_TYPE_ALL, &devices);
+
+        ctx_ = cl::Context(devices);
+        std::string source;
+
+        if (is_floating_point)
+        {
+            // TODO: compares should result in all bits set to 1
+
+            source = "__kernel void add(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                    ""
+                    "__kernel void add_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                    ""
+                    "__kernel void add_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                    ""
+                    "__kernel void add_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                    ""
+                    "__kernel void add_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                    ""
+                    "__kernel void sub(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                    ""
+                    "__kernel void sub_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                    ""
+                    "__kernel void sub_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                    ""
+                    "__kernel void sub_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                    ""
+                    "__kernel void sub_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                    ""
+                    "__kernel void mul(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] * B[i];}\n\n"
+                    ""
+                    "__kernel void div(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] / B[i];}\n\n"
+                    ""
+                    "__kernel void shl(__global const T *A, unsigned int B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] * pow(2.0, B);}\n\n"
+                    ""
+                    "__kernel void shr(__global const T *A, unsigned int B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] / pow(2.0, B);}\n\n"
+                    ""
+                    "__kernel void negate(__global const T *A, __global T *B)\n"
+                    "{size_t i = get_global_id(0); B[i] = -A[i];}\n\n"
+                    ""
+                    "__kernel void absolute(__global const T *A, __global T *B)\n"
+                    "{size_t i = get_global_id(0); B[i] = abs(A[i]);}\n\n"
+                    ""
+                    "__kernel void avg(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = (A[i] + B[i]) / 2.0;}\n\n"
+                    ""
+                    "__kernel void eq(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] == B[i]? -1: 0;}\n\n"
+                    ""
+                    "__kernel void ne(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] != B[i]? -1: 0;}\n\n"
+                    ""
+                    "__kernel void lt(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] < B[i]? -1: 0;}\n\n"
+                    ""
+                    "__kernel void gt(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] > B[i]? -1: 0;}\n\n"
+                    ""
+                    "__kernel void le(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] <= B[i]? -1: 0;}\n\n"
+                    ""
+                    "__kernel void ge(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] >= B[i]? -1: 0;}\n\n";
+        }
+        else
+        {
+            // TODO: signed saturation
+            // TODO: signed hi part
+
+            source = "__kernel void add(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                    ""
+                    "__kernel void add_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                    ""
+                    "__kernel void add_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); T temp = A[i] + B[i]; C[i] = temp < A[i];}\n\n"
+                    ""
+                    "__kernel void add_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                    ""
+                    "__kernel void add_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); T temp = A[i] + B[i]; C[i] = temp < A[i]? -1: temp;}\n\n"
+                    ""
+                    "__kernel void sub(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                    ""
+                    "__kernel void sub_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                    ""
+                    "__kernel void sub_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); T temp = A[i] - B[i]; C[i] = temp > A[i];}\n\n"
+                    ""
+                    "__kernel void sub_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                    ""
+                    "__kernel void sub_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); T temp = A[i] - B[i]; C[i] = temp > A[i]? 0: temp;}\n\n"
+                    ""
+                    "__kernel void mul(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] * B[i];}\n\n"
+                    ""
+                    "__kernel void div(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] / B[i];}\n\n"
+                    ""
+                    "__kernel void shl(__global const T *A, unsigned int B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] << B;}\n\n"
+                    ""
+                    "__kernel void shr(__global const T *A, unsigned int B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] >> B;}\n\n"
+                    ""
+                    "__kernel void negate(__global const T *A, __global T *B)\n"
+                    "{size_t i = get_global_id(0); B[i] = -A[i];}\n\n"
+                    ""
+                    "__kernel void absolute(__global const T *A, __global T *B)\n"
+                    "{size_t i = get_global_id(0); B[i] = abs(A[i]);}\n\n"
+                    ""
+                    "__kernel void avg(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = (A[i] + B[i] + 1) / 2;}\n\n"
+                    ""
+                    "__kernel void eq(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] == B[i]? -1: 0;}\n\n"
+                    ""
+                    "__kernel void ne(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] != B[i]? -1: 0;}\n\n"
+                    ""
+                    "__kernel void lt(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] < B[i]? -1: 0;}\n\n"
+                    ""
+                    "__kernel void gt(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] > B[i]? -1: 0;}\n\n"
+                    ""
+                    "__kernel void le(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] <= B[i]? -1: 0;}\n\n"
+                    ""
+                    "__kernel void ge(__global const T *A, __global const T *B, __global T *C)\n"
+                    "{size_t i = get_global_id(0); C[i] = A[i] >= B[i]? -1: 0;}\n\n";
+        }
+
+        for (size_t i = 0; i = source.find('T', i), i != source.npos;)
+            source.replace(i, 1, type);
+
+        for (size_t i = 0; i = source.find('X', i), i != source.npos;)
+            source.replace(i, 1, double_type);
+
+        prog_ = cl::Program(ctx_, source, true);
+        prog_.createKernels(&kernels_);
+
+        queue_ = cl::CommandQueue(ctx_);
+    }
+};
 
 namespace cppbits {
 template<unsigned int desired_elements, unsigned int element_bits, typename EffectiveType>
 class opencl_simd_vector {
-    static_assert(std::is_unsigned<T>::value, "T must be an unsigned integral type");
     static_assert(element_bits, "Number of bits per element must be greater than zero");
 
     static constexpr unsigned int vector_digits = desired_elements * element_bits;
@@ -45,90 +237,157 @@ public:
     typedef cl::Buffer underlying_vector_type;
 
 private:
+    static opencl_compile<EffectiveType, elements_are_floats, elements_are_signed> &interface()
+    {
+        static opencl_compile<EffectiveType, elements_are_floats, elements_are_signed> compile;
+        return compile;
+    }
+
+    enum kernel_entry
+    {
+        kernel_abs,
+        kernel_add,
+        kernel_add_hi_signed,
+        kernel_add_hi_unsigned,
+        kernel_add_sat_signed,
+        kernel_add_sat_unsigned,
+        kernel_avg,
+        kernel_div,
+        kernel_eq,
+        kernel_ge,
+        kernel_gt,
+        kernel_le,
+        kernel_lt,
+        kernel_mul,
+        kernel_ne,
+        kernel_neg,
+        kernel_shl,
+        kernel_shr,
+        kernel_sub,
+        kernel_sub_hi_signed,
+        kernel_sub_hi_unsigned,
+        kernel_sub_sat_signed,
+        kernel_sub_sat_unsigned
+    };
+
     static constexpr underlying_element_type ones = -1;
     static constexpr unsigned int elements = vector_digits / element_bits;
     static constexpr underlying_element_type element_mask = ones >> (std::numeric_limits<underlying_element_type>::digits - element_bits);
 
     static constexpr bool effective_type_is_exact_size = sizeof(EffectiveType) * CHAR_BIT == element_bits;
+    static_assert(effective_type_is_exact_size, "EffectiveType must be the same size as each element for OpenCL SIMD wrappers to work properly");
     static_assert(!elements_are_floats || (element_bits == 32 || element_bits == 64), "Floating-point element size must be 32 or 64 bits");
     static_assert(element_bits <= 64, "Element size is too large");
     static_assert(elements_are_floats || (sizeof(EffectiveType) * CHAR_BIT) >= element_bits, "Element size is too large for specified effective type `EffectiveType`");
 
-    constexpr explicit opencl_simd_vector(T value) : data_(value) {}
-
-    constexpr static T make_t_from_effective(EffectiveType v)
+    constexpr static underlying_element_type make_t_from_effective(EffectiveType v)
     {
-        return elements_are_floats? element_bits == 32? T(float_to_ieee_754(v)): T(double_to_ieee_754(v)): T(v);
+        return elements_are_floats? element_bits == 32? underlying_element_type(float_to_ieee_754(v)): underlying_element_type(double_to_ieee_754(v)): underlying_element_type(v);
     }
-    static EffectiveType make_effective_from_t(T v)
+    static EffectiveType make_effective_from_t(underlying_element_type v)
     {
         if (elements_are_floats)
             return element_bits == 32? EffectiveType(float_from_ieee_754(v)):
                                        EffectiveType(double_from_ieee_754(v));
         else if (elements_are_signed)
         {
-            const T val = v & (element_mask >> 1);
-            const T negative = v >> (element_bits - 1);
+            const underlying_element_type val = v & (element_mask >> 1);
+            const underlying_element_type negative = v >> (element_bits - 1);
             return negative? val == 0? scalar_min(): -EffectiveType((~val + 1) & (element_mask >> 1)): EffectiveType(val);
         }
         return EffectiveType(v);
     }
 
+    static constexpr unsigned int buf_size = (((vector_digits / 8) >> 5) + 1) << 5;
+
+    /*
+     *  Special constructor for output of operations
+     */
+    constexpr opencl_simd_vector(bool)
+        : data_{}
+        , push_first_(false)
+        , pull_first_(true)
+        , buf_(interface().context(), CL_MEM_READ_WRITE, buf_size)
+    {}
+
 public:
     /*
      * Default constructor zeros the vector
      */
-    constexpr opencl_simd_vector() : data_{}, ctx_(CL_DEVICE_TYPE_ALL), buf_(ctx_, CL_MEM_USE_HOST_PTR, vector_digits / 8, data_) {}
+    constexpr opencl_simd_vector()
+        : data_{}
+        , push_first_(true)
+        , pull_first_(false)
+        , buf_(interface().context(), CL_MEM_READ_WRITE, buf_size)
+    {}
 
     /*
      * Copy constructor copies the data and context, initializes new buffer
      */
-    constexpr opencl_simd_vector(const opencl_simd_vector &other)
-        : data_{}
-        , ctx_(other.ctx_)
-        , buf_(ctx_, CL_MEM_USE_HOST_PTR, vector_digits / 8, data_)
+    opencl_simd_vector(const opencl_simd_vector &other)
+        : data_(other.data_)
+        , push_first_(other.push_first_)
+        , pull_first_(other.pull_first_)
+        , buf_(other.buf_)
     {}
 
     /*
-     * Returns a new representation of the vector, casted to a different type.
-     * The data is not modified.
+     * Move constructor copies the data and context, initializes new buffer
      */
-    template<typename NewType>
-    constexpr native_simd_vector<T, element_bits, NewType> cast() const {return native_simd_vector<T, element_bits, NewType>::make_vector(data_);}
+    opencl_simd_vector(opencl_simd_vector &&other)
+        : data_(std::move(other.data_))
+        , push_first_(other.push_first_)
+        , pull_first_(other.pull_first_)
+        , buf_(std::move(other.buf_))
+    {}
 
     /*
-     * Returns a new representation of the vector, casted to a different type with different element size.
-     * The data is not modified.
+     * Copy assignment copies data and buffer
      */
-    template<unsigned int element_size, typename NewType>
-    native_simd_vector<T, element_size, NewType> cast() const {return native_simd_vector<T, element_size, NewType>::make_vector(data_);}
+    type &operator=(const opencl_simd_vector &other)
+    {
+        using namespace std;
+        if (!other.pull_first_)
+            copy(other.data_.begin(), other.data_.end(), data_.begin());
+        push_first_ = other.push_first_;
+        pull_first_ = other.pull_first_;
+        buf_ = other.buf_;
+        return *this;
+    }
 
     /*
-     * Returns a new representation of the vector, casted to a different type with different element size, with a different underlying type.
-     * The data is not modified.
+     * Move assignment moves data and buffer
      */
-    template<typename UnderlyingType, unsigned int element_size, typename NewType>
-    native_simd_vector<UnderlyingType, element_size, NewType> cast() const {return native_simd_vector<UnderlyingType, element_size, NewType>::make_vector(data_);}
-
-    /*
-     * Returns a representation of a vector with specified value assigned to the entire vector
-     */
-    constexpr static type make_vector(T value) {return type(value);}
+    type &operator=(opencl_simd_vector &&other)
+    {
+        using namespace std;
+        if (!other.pull_first_)
+            move(other.data_.begin(), other.data_.end(), data_.begin());
+        push_first_ = other.push_first_;
+        pull_first_ = other.pull_first_;
+        buf_ = std::move(other.buf_);
+        return *this;
+    }
 
     /*
      * Returns a representation of a vector with specified value assigned to element 0
      */
-    constexpr static type make_scalar(EffectiveType value) {return type(make_t_from_effective(value) & element_mask);}
+    static type make_scalar(EffectiveType value)
+    {
+        type result;
+        result.data_[0] = make_t_from_effective(value);
+        return result;
+    }
 
     /*
      * Returns a representation of a vector with specified value assigned to every element in the vector
      */
-    constexpr static type make_broadcast(EffectiveType value) {return type((make_t_from_effective(value) & element_mask) * expand_mask(1, element_bits, elements));}
-
-    /*
-     * Sets this vector to a representation of a vector with specified value assigned to the entire vector
-     */
-    type &vector(T value) {return *this = make_vector(value);}
+    static type make_broadcast(EffectiveType value)
+    {
+        type result;
+        result.data_.fill(make_t_from_effective(value));
+        return result;
+    }
 
     /*
      * Sets this vector to a representation of a vector with specified value assigned to element 0
@@ -142,11 +401,6 @@ public:
     type &broadcast(EffectiveType value) {return *this = make_broadcast(value);}
 
     /*
-     * Returns the internal representation of the entire vector
-     */
-    constexpr T vector() const {return data_;}
-
-    /*
      * Returns the value of element 0
      */
     EffectiveType scalar() const {return get<0>();}
@@ -156,21 +410,21 @@ public:
      */
     constexpr type operator~() const
     {
-        return type(~data_ & mask);
+        return make_init_raw_value([](underlying_element_type a) {return ~a;});
     }
 
     /*
      * Logical OR's the entire vector with `vec` and returns it
      */
-    constexpr type operator|(generic_simd_vector vec) const
+    constexpr type operator|(opencl_simd_vector vec) const
     {
-        return type(data_ | vec.vector());
+        return make_init_raw_values(vec, [](underlying_element_type a, underlying_element_type b) {return a | b;});
     }
 
     /*
      * Logical AND's the entire vector with `vec` and returns it
      */
-    constexpr type operator&(generic_simd_vector vec) const
+    constexpr type operator&(opencl_simd_vector vec) const
     {
         return type(data_ & vec.vector());
     }
@@ -178,7 +432,7 @@ public:
     /*
      * Logical AND's the entire vector with negated `vec` and returns it
      */
-    constexpr type and_not(generic_simd_vector vec) const
+    constexpr type and_not(opencl_simd_vector vec) const
     {
         return type(data_ & ~vec.vector());
     }
@@ -186,7 +440,7 @@ public:
     /*
      * Logical XOR's the entire vector with `vec` and returns it
      */
-    constexpr type operator^(generic_simd_vector vec) const
+    constexpr type operator^(opencl_simd_vector vec) const
     {
         return type(data_ ^ vec.vector());
     }
@@ -202,140 +456,121 @@ public:
     /*
      * Adds elements of `vec` to `this` (using rollover addition) and returns the result
      */
-    type operator+(generic_simd_vector vec) const {return add(vec, cppbits::math_keeplow);}
+    type operator+(opencl_simd_vector vec) const {return add(vec, cppbits::math_keeplow);}
 
     /*
      * Adds elements of `vec` to `this` (using specified math method) and returns the result
      */
-    type add(generic_simd_vector vec, cppbits::math_type math) const
+    type add(opencl_simd_vector vec, cppbits::math_type math) const
     {
+        type result(true);
+
+        push();
+        vec.push();
+
+        cl::Kernel *ref;
+
         if (elements_are_floats)
-            return make_init_values(vec, [](EffectiveType a, EffectiveType b) {return a + b;});
+            ref = &interface().kernel(kernel_add);
         else
         {
-            constexpr T add_mask = expand_mask(element_mask >> 1, element_bits, elements);
-            constexpr T inverted_mask = ~add_mask & mask;
-            switch (math) {
-                default: /* Rollover arithmetic, math_keeplow */
-                    /// Cost: 6 - Should compile down to three ANDs, one addition, and two XORs
-                    return type(((data_ & add_mask) + (vec.vector() & add_mask)) ^ ((data_ ^ vec.vector()) & inverted_mask));
-                case cppbits::math_saturate:
-                    if (elements_are_signed)
-                    {
-                        /// Cost: 19 - Should compile down to seven ANDs, one addition, four XORs, two shifts, two subtractions, two multiplies, and one OR
-                        const T temp = ((data_ & add_mask) + (vec.vector() & add_mask)) ^ ((data_ ^ vec.vector()) & inverted_mask);
-                        const T overflow = ((data_ ^ temp) & (vec.vector() ^ temp) & inverted_mask) >> (element_bits - 1);
-                        return type((temp & ((expand_mask(1, element_bits, elements) - overflow) * element_mask)) |
-                                    (overflow * (element_mask ^ (element_mask >> 1)) - ((temp >> (element_bits - 1)) & overflow)));
-                    }
-                    else
-                    {
-                        /// Cost: 14 - Should compile down to six ANDs, one addition, three ORs, one shift, one multiply, and two XORs
-                        const T temp = ((data_ & add_mask) + (vec.vector() & add_mask)) ^ ((data_ ^ vec.vector()) & inverted_mask);
-                        return type(temp | ((((data_ & vec.vector()) | (~temp & (data_ | vec.vector()))) & inverted_mask) >> (element_bits - 1)) * element_mask);
-                    }
-                case cppbits::math_keephigh:
-                {
-                    constexpr T overflow_mask = expand_mask(1, element_bits, elements);
-                    if (elements_are_signed)
-                        /// Cost: 10 - Should compile down to five ANDs, one addition, one OR, one shift, one multiply, and one XOR
-                        return type(((((data_ & vec.vector()) | (((data_ & add_mask) + (vec.vector() & add_mask)) & (data_ ^ vec.vector()))) >> (element_bits - 1)) & overflow_mask) * element_mask);
-                    else
-                        /// Cost: 9 - Should compile down to five ANDs, one addition, one OR, one shift, and one XOR
-                        return type((((data_ & vec.vector()) | (((data_ & add_mask) + (vec.vector() & add_mask)) & (data_ ^ vec.vector()))) >> (element_bits - 1)) & overflow_mask);
-                }
+            switch (math)
+            {
+                default: /* Rollover arithmetic */ ref = &interface().kernel(kernel_add); break;
+                case cppbits::math_saturate: ref = &interface().kernel(elements_are_signed? kernel_add_sat_signed: kernel_add_sat_unsigned); break;
+                case cppbits::math_keephigh: ref = &interface().kernel(elements_are_signed? kernel_add_hi_signed: kernel_add_hi_unsigned); break;
             }
         }
+
+        ref->setArg(0, buf_);
+        ref->setArg(1, vec.buf_);
+        ref->setArg(2, result.buf_);
+
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+
+        return result;
     }
 
     /*
      * Subtracts elements of `vec` to `this` (using rollover subtraction) and returns the result
      */
-    type operator-(generic_simd_vector vec) const {return sub(vec, cppbits::math_keeplow);}
+    type operator-(opencl_simd_vector vec) const {return sub(vec, cppbits::math_keeplow);}
 
     /*
      * Subtracts elements of `vec` from `this` (using specified math method) and returns the result
      */
-    type sub(generic_simd_vector vec, cppbits::math_type math) const
+    type sub(opencl_simd_vector vec, cppbits::math_type math) const
     {
+        type result(true);
+
+        push();
+        vec.push();
+
+        cl::Kernel *ref;
+
         if (elements_are_floats)
-            return make_init_values(vec, [](EffectiveType a, EffectiveType b) {return a - b;});
+            ref = &interface().kernel(kernel_sub);
         else
         {
-            constexpr T sub_mask = expand_mask(element_mask >> 1, element_bits, elements);
-            constexpr T inverted_mask = ~sub_mask & mask;
-            switch (math) {
-                default: /* Rollover arithmetic, math_keeplow */
-                    /// Cost: 7 - Should compile down to two ANDs, one subtraction, one OR, one NOT, and two XORs
-                    return type(((data_ | inverted_mask) - (vec.vector() & sub_mask)) ^ ((data_ ^ ~vec.vector()) & inverted_mask));
-                case cppbits::math_saturate:
-                    if (elements_are_signed)
-                    {
-                        const T temp = ((data_ | inverted_mask) - (vec.vector() & sub_mask)) ^ ((data_ ^ ~vec.vector()) & inverted_mask);
-                        const T overflow = ((data_ ^ temp) & ~(vec.vector() ^ temp) & inverted_mask) >> (element_bits - 1);
-                        return type((temp & ((expand_mask(1, element_bits, elements) - overflow) * element_mask)) |
-                                    (overflow * (element_mask ^ (element_mask >> 1)) - ((temp >> (element_bits - 1)) & overflow)));
-                    }
-                    else
-                    {
-                        const T temp = ((data_ | inverted_mask) - (vec.vector() & sub_mask)) ^ ((data_ ^ ~vec.vector()) & inverted_mask);
-                        return type(temp & ((~((vec.vector() & temp) | (~data_ & (vec.vector() | temp))) & inverted_mask) >> (element_bits - 1)) * element_mask);
-                    }
-                case cppbits::math_keephigh: /* TODO: not accurate right now */
-                    CPPBITS_ERROR("Subtraction with math_keephigh not implemented yet");
-                    constexpr T overflow_mask = expand_mask(1, element_bits, elements);
-                    if (elements_are_signed)
-                        return type((((((data_ | inverted_mask) - (vec.vector() & sub_mask)) & (data_ ^ ~vec.vector())) >> (element_bits - 1)) & overflow_mask) * element_mask);
-                    else
-                        return type(((((data_ | inverted_mask) - (vec.vector() & sub_mask)) & (data_ ^ ~vec.vector())) >> (element_bits - 1)) & overflow_mask);
+            switch (math)
+            {
+                default: /* Rollover arithmetic */ ref = &interface().kernel(kernel_sub); break;
+                case cppbits::math_saturate: ref = &interface().kernel(elements_are_signed? kernel_sub_sat_signed: kernel_sub_sat_unsigned); break;
+                case cppbits::math_keephigh: ref = &interface().kernel(elements_are_signed? kernel_sub_hi_signed: kernel_sub_hi_unsigned); break;
             }
         }
+
+        ref->setArg(0, buf_);
+        ref->setArg(1, vec.buf_);
+        ref->setArg(2, result.buf_);
+
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+
+        return result;
     }
 
     /*
      * Multiplies elements of `vec` by `this` (using rollover multiplication) and returns the result
      */
-    type operator*(generic_simd_vector vec) const {return mul(vec, cppbits::math_keeplow);}
+    type operator*(opencl_simd_vector vec) const {return mul(vec, cppbits::math_keeplow);}
 
     /*
      * Multiplies elements of `vec` by `this` (using specified math method) and returns the result
      */
-    type mul(generic_simd_vector vec, cppbits::math_type math) const
+    type mul(opencl_simd_vector vec, cppbits::math_type math) const
     {
+        type result(true);
+
+        push();
+        vec.push();
+
+        cl::Kernel *ref;
+
         if (elements_are_floats)
-            return make_init_values(vec, [](EffectiveType a, EffectiveType b) {return a * b;});
+            ref = &interface().kernel(kernel_mul);
         else
         {
             switch (math)
             {
-                default: /* Rollover arithmetic, math_keeplow */
-                    return make_init_values(vec, [](EffectiveType a, EffectiveType b)
-                    {
-                        return a * b;
-                    });
-                case cppbits::math_saturate:
-                    return make_init_values(vec, [](EffectiveType a, EffectiveType b)
-                    {
-                        /* TODO: may overflow, and EffectiveType may not be able to hold the double-size result */
-                        const EffectiveType temp = a * b;
-
-                        if (temp > scalar_max())
-                            return scalar_max();
-                        else if (elements_are_signed && temp < scalar_min())
-                            return scalar_min();
-                        else
-                            return temp;
-                    });
-                case cppbits::math_keephigh:
-                    CPPBITS_ERROR("Multiplication with math_keephigh not implemented yet");
+                default: /* Rollover arithmetic */ ref = &interface().kernel(kernel_mul); break;
+                case cppbits::math_saturate: CPPBITS_ERROR("Multiplication with math_saturate not implemented yet");
+                case cppbits::math_keephigh: CPPBITS_ERROR("Multiplication with math_keephigh not implemented yet");
             }
         }
+
+        ref->setArg(0, buf_);
+        ref->setArg(1, vec.buf_);
+        ref->setArg(2, result.buf_);
+
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+
+        return result;
     }
 
     /*
      * Multiplies elements of `vec` by `this` (using specified math method), adds `add`, and returns the result
      */
-    constexpr type mul_add(generic_simd_vector vec, generic_simd_vector add, cppbits::math_type math) const
+    constexpr type mul_add(opencl_simd_vector vec, opencl_simd_vector add, cppbits::math_type math) const
     {
         return mul(vec, math).add(add, math);
     }
@@ -343,7 +578,7 @@ public:
     /*
      * Multiplies elements of `vec` by `this` (using specified math method), subtracts `sub`, and returns the result
      */
-    constexpr type mul_sub(generic_simd_vector vec, generic_simd_vector sub, cppbits::math_type math) const
+    constexpr type mul_sub(opencl_simd_vector vec, opencl_simd_vector sub, cppbits::math_type math) const
     {
         return mul(vec, math).sub(sub, math);
     }
@@ -351,30 +586,41 @@ public:
     /*
      * Divides elements of `this` by `vec` (using rollover division) and returns the result
      */
-    type operator/(generic_simd_vector vec) const {return div(vec, cppbits::math_keeplow);}
+    type operator/(opencl_simd_vector vec) const {return div(vec, cppbits::math_keeplow);}
 
     /*
      * Divides elements of `this` by `vec` (using specified math method) and returns the result
      */
-    type div(generic_simd_vector vec, cppbits::math_type math) const
+    type div(opencl_simd_vector vec, cppbits::math_type math) const
     {
+        type result(true);
+
+        push();
+        vec.push();
+
+        cl::Kernel *ref;
+
         if (elements_are_floats)
-            return make_init_values(vec, [](EffectiveType a, EffectiveType b) {return a / b;});
+            ref = &interface().kernel(kernel_div);
         else if (vec.has_zero_element())
             CPPBITS_ERROR("Division by zero");
         else
         {
             switch (math)
             {
-                default: /* Rollover arithmetic, math_keeplow, or math_saturate */
-                    return make_init_values(vec, [](EffectiveType a, EffectiveType b)
-                    {
-                        return a / b;
-                    });
-                case cppbits::math_keephigh:
-                    CPPBITS_ERROR("Division with math_keephigh not implemented yet");
+                default: /* Rollover arithmetic */ ref = &interface().kernel(kernel_div); break;
+                case cppbits::math_saturate: CPPBITS_ERROR("division with math_saturate not implemented yet");
+                case cppbits::math_keephigh: CPPBITS_ERROR("division with math_keephigh not implemented yet");
             }
         }
+
+        ref->setArg(0, buf_);
+        ref->setArg(1, vec.buf_);
+        ref->setArg(2, result.buf_);
+
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+
+        return result;
     }
 
     /*
@@ -382,17 +628,22 @@ public:
      * or `((element of this) + (element of vec))/2` for floating-point values
      * TODO: if element_bits == number of bits in T, undefined behavior results
      */
-    type avg(generic_simd_vector vec) const
+    type avg(opencl_simd_vector vec) const
     {
-        if (elements_are_floats)
-            return make_init_values(vec, [](EffectiveType a, EffectiveType b) {return (a + b) * 0.5;});
-        else
-        {
-            constexpr T ones_mask = expand_mask(1, element_bits * 2, (elements+1) / 2);
-            constexpr T avg_mask = expand_mask(element_mask, element_bits * 2, (elements+1) / 2);
-            return type((((ones_mask + ((data_ >> element_bits) & avg_mask) + ((vec.vector() >> element_bits) & avg_mask)) << (element_bits - 1)) & (avg_mask << element_bits)) |
-                        (((ones_mask + (data_ & avg_mask) + (vec.vector() & avg_mask)) >> 1) & avg_mask));
-        }
+        type result(true);
+
+        push();
+        vec.push();
+
+        cl::Kernel *ref = &interface().kernel(kernel_avg);
+
+        ref->setArg(0, buf_);
+        ref->setArg(1, vec.buf_);
+        ref->setArg(2, result.buf_);
+
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+
+        return result;
     }
 
     /*
@@ -400,7 +651,7 @@ public:
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
      * TODO: support floating-point values
      */
-    constexpr type operator<<(unsigned int amount) const {return shl(amount);}
+    type operator<<(unsigned int amount) const {return shl(amount);}
 
     /*
      * Shifts each element of `this` to the left by `amount` and returns the resulting vector
@@ -408,9 +659,21 @@ public:
      * TODO: if element_bits == number of bits in T, undefined behavior results
      * TODO: support floating-point values
      */
-    constexpr type shl(unsigned int amount) const
+    type shl(unsigned int amount) const
     {
-        return type((data_ << amount) & ((~expand_mask(1, element_bits, elements) & mask) * (element_mask >> (element_bits - amount))));
+        type result(true);
+
+        push();
+
+        cl::Kernel *ref = &interface().kernel(kernel_shl);
+
+        ref->setArg(0, buf_);
+        ref->setArg(1, amount);
+        ref->setArg(2, result.buf_);
+
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+
+        return result;
     }
 
     /*
@@ -418,7 +681,9 @@ public:
      * If the invariant `0 <= amount <= element_bits` does not hold, undefined behavior results
      * TODO: support floating-point values
      */
+#if 0
     constexpr type operator>>(unsigned int amount) const {return shr(amount, cppbits::shift_natural);}
+#endif
 
     /*
      * Shifts each element of `this` to the right by `amount` (using specified shift type) and returns the resulting vector
@@ -426,6 +691,7 @@ public:
      * TODO: if element_bits == number of bits in T, undefined behavior results
      * TODO: support floating-point values
      */
+#if 0
     type shr(unsigned int amount, cppbits::shift_type shift) const
     {
         switch (shift) {
@@ -450,13 +716,15 @@ public:
                 return type((data_ >> amount) & (expand_mask(1, element_bits, elements) * (element_mask >> amount)));
         }
     }
+#endif
 
     /*
      * Extracts MSB from each element and places them in the low bits of the result
      * Each bit position in the result corresponds to the element position in the source vector
      * (i.e. Element 0 MSB -> Bit 0, Element 1 MSB -> Bit 1, etc.)
      */
-    T movmsk() const
+#if 0
+    unsigned int movmsk() const
     {
         if (element_bits == 1)
             return data_;
@@ -468,6 +736,7 @@ public:
             return result;
         }
     }
+#endif
 
     /*
      * Negates elements of `this` and returns the resulting vector
@@ -476,45 +745,47 @@ public:
      */
     type negate() const
     {
-        if (elements_are_floats)
-        {
-            constexpr T neg_mask = expand_mask(element_mask ^ (element_mask >> 1), element_bits, elements);
-            return {data_ ^ neg_mask};
-        }
-        else if (elements_are_signed)
-        {
-            constexpr T neg_mask = expand_mask(element_mask >> 1, element_bits, elements);
-            constexpr T add_mask = expand_mask(1, element_bits, elements);
-            return {(~data_ & neg_mask) + add_mask};
-        }
-        return *this;
+        type result(true);
+
+        push();
+
+        cl::Kernel *ref = &interface().kernel(kernel_neg);
+
+        ref->setArg(0, buf_);
+        ref->setArg(1, result.buf_);
+
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+
+        return result;
     }
 
     /*
      * Computes the absolute value of elements of `this` and returns the resulting vector
      * Note that this function returns the value unmodified if EffectiveType is not a signed type
-     * TODO: are floating-point values supported properly?
      */
     type abs() const
     {
-        if (elements_are_floats)
-        {
-            constexpr T neg_mask = expand_mask(element_mask >> 1, element_bits, elements);
-            return {data_ & neg_mask};
-        }
-        else if (elements_are_signed)
-        {
-            constexpr T abs_mask = expand_mask(element_mask >> 1, element_bits, elements);
-            const T neg = (data_ & abs_mask) >> (element_bits - 1);
-            return {((data_ ^ (neg * element_mask)) & abs_mask) + neg};
-        }
-        return *this;
+        if (!elements_are_floats && !elements_are_signed)
+            return *this;
+
+        type result(true);
+
+        push();
+
+        cl::Kernel *ref = &interface().kernel(kernel_abs);
+
+        ref->setArg(0, buf_);
+        ref->setArg(1, result.buf_);
+
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+
+        return result;
     }
 
     /*
      * Computes the hypotenuse length (`sqrt(x^2 + y^2)`) and returns the resulting vector
      */
-    constexpr type hypot(generic_simd_vector vec, cppbits::math_type math) const
+    constexpr type hypot(opencl_simd_vector vec, cppbits::math_type math) const
     {
         return mul_add(*this, vec.mul(vec, math), math).sqrt(math);
     }
@@ -532,20 +803,12 @@ public:
      * See <http://graphics.stanford.edu/~seander/bithacks.html#HasLessInWord>
      * This is a rewrite of hasless(u, 1)
      */
-    bool has_zero_element() const
+    bool has_zero_element()
     {
-        if (elements_are_floats)
-        {
-            bool has_zero = false;
-            for (unsigned i = 0; i < max_elements(); ++i)
-                has_zero |= get(i) == 0.0;
-            return has_zero;
-        }
-        else
-        {
-            return element_bits == 1? data_ != mask: ((data_ - expand_mask(1, element_bits, elements)) &
-                    (~data_ & expand_mask(element_mask ^ (element_mask >> 1), element_bits, elements))) != 0;
-        }
+        bool has_zero = false;
+        for (unsigned i = 0; i < max_elements(); ++i)
+            has_zero |= get(i) == EffectiveType(0);
+        return has_zero;
     }
 
     /*
@@ -555,19 +818,10 @@ public:
      */
     unsigned int count_zero_elements() const
     {
-        if (elements_are_floats || element_mask <= elements)
-        {
-            unsigned zeros = 0;
-            for (unsigned i = 0; i < max_elements(); ++i)
-                zeros += get(i) == 0;
-            return zeros;
-        }
-        else
-        {
-            constexpr T test_mask = expand_mask(element_mask >> 1, element_bits, elements);
-            constexpr T inverted_mask = ~test_mask & mask;
-            return (((inverted_mask - (data_ & test_mask)) & ~data_ & inverted_mask) >> (element_bits - 1)) % element_mask;
-        }
+        unsigned zeros = 0;
+        for (unsigned i = 0; i < max_elements(); ++i)
+            zeros += get(i) == EffectiveType(0);
+        return zeros;
     }
 
     /*
@@ -577,17 +831,10 @@ public:
      */
     bool has_equal_element(EffectiveType v) const
     {
-        if (elements_are_floats)
-        {
-            bool has_equal = false;
-            for (unsigned i = 0; i < max_elements(); ++i)
-                has_equal |= get(i) == v;
-            return has_equal;
-        }
-        else
-        {
-            return (*this ^ make_broadcast(v)).has_zero_element();
-        }
+        bool has_equal = false;
+        for (unsigned i = 0; i < max_elements(); ++i)
+            has_equal |= get(i) == v;
+        return has_equal;
     }
 
     /*
@@ -597,17 +844,10 @@ public:
      */
     unsigned int count_equal_elements(EffectiveType v) const
     {
-        if (elements_are_floats || element_mask <= elements)
-        {
-            unsigned equals = 0;
-            for (unsigned i = 0; i < max_elements(); ++i)
-                equals += get(i) == v;
-            return equals;
-        }
-        else
-        {
-            return (*this ^ make_broadcast(v)).count_zero_elements();
-        }
+        unsigned equals = 0;
+        for (unsigned i = 0; i < max_elements(); ++i)
+            equals += get(i) == v;
+        return equals;
     }
 
     /*
@@ -615,24 +855,39 @@ public:
      * Otherwise, if the comparison result is false, the corresponding element is set to all 0's
      * TODO: verify comparisons for floating-point values
      */
-    type cmp(generic_simd_vector vec, cppbits::compare_type compare) const
+    type cmp(opencl_simd_vector vec, cppbits::compare_type compare) const
     {
+        type result(true);
+
+        push();
+        vec.push();
+
+        cl::Kernel *ref;
+
         switch (compare) {
-            default: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a == b;});
-            case cppbits::compare_nequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a != b;});
-            case cppbits::compare_less: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a < b;});
-            case cppbits::compare_lessequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a <= b;});
-            case cppbits::compare_greater: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a > b;});
-            case cppbits::compare_greaterequal: return make_init_cmp_values(vec, [](EffectiveType a, EffectiveType b) {return a >= b;});
+            default: ref = &interface().kernel(kernel_eq); break;
+            case cppbits::compare_nequal: ref = &interface().kernel(kernel_ne); break;
+            case cppbits::compare_less: ref = &interface().kernel(kernel_lt); break;
+            case cppbits::compare_lessequal: ref = &interface().kernel(kernel_le); break;
+            case cppbits::compare_greater: ref = &interface().kernel(kernel_gt); break;
+            case cppbits::compare_greaterequal: ref = &interface().kernel(kernel_ge); break;
         }
+
+        ref->setArg(0, buf_);
+        ref->setArg(1, vec.buf_);
+        ref->setArg(2, result.buf_);
+
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+
+        return result;
     }
 
-    type operator==(generic_simd_vector vec) const {return cmp(vec, cppbits::compare_equal);}
-    type operator!=(generic_simd_vector vec) const {return cmp(vec, cppbits::compare_nequal);}
-    type operator<(generic_simd_vector vec) const {return cmp(vec, cppbits::compare_less);}
-    type operator<=(generic_simd_vector vec) const {return cmp(vec, cppbits::compare_lessequal);}
-    type operator>(generic_simd_vector vec) const {return cmp(vec, cppbits::compare_greater);}
-    type operator>=(generic_simd_vector vec) const {return cmp(vec, cppbits::compare_greaterequal);}
+    type operator==(opencl_simd_vector vec) const {return cmp(vec, cppbits::compare_equal);}
+    type operator!=(opencl_simd_vector vec) const {return cmp(vec, cppbits::compare_nequal);}
+    type operator<(opencl_simd_vector vec) const {return cmp(vec, cppbits::compare_less);}
+    type operator<=(opencl_simd_vector vec) const {return cmp(vec, cppbits::compare_lessequal);}
+    type operator>(opencl_simd_vector vec) const {return cmp(vec, cppbits::compare_greater);}
+    type operator>=(opencl_simd_vector vec) const {return cmp(vec, cppbits::compare_greaterequal);}
 
     /*
      * Sets each element in output to reciprocal of respective element in `this`
@@ -683,37 +938,44 @@ public:
      * Sets each element in output to maximum of respective elements of `this` and `vec`
      * TODO: verify comparisons for floating-point values
      */
-    type max(generic_simd_vector vec) const
+#if 0
+    type max(opencl_simd_vector vec) const
     {
         return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return max(a, b);});
     }
+#endif
 
     /*
      * Sets each element in output to minimum of respective elements of `this` and `vec`
      * TODO: verify comparisons for floating-point values
      */
-    type min(generic_simd_vector vec) const
+#if 0
+    type min(opencl_simd_vector vec) const
     {
         return make_init_values(vec, [](EffectiveType a, EffectiveType b) {using namespace std; return min(a, b);});
     }
+#endif
 
     /*
      * Sets element `idx` to `value`
      */
+#if 0
     template<unsigned int idx>
     type &set(EffectiveType value)
     {
         data_ |= bitfield_member<T, idx * element_bits, element_bits>(make_t_from_effective(value)).bitfield_value() & mask;
         return *this;
     }
+#endif
 
     /*
      * Sets element `idx` to `value`
      */
     type &set(unsigned int idx, EffectiveType value)
     {
-        const unsigned int shift = idx * element_bits;
-        data_ = (data_ & ~(element_mask << shift)) | ((make_t_from_effective(value) & element_mask) << shift);
+        pull();
+        push_first_ = true;
+        data_[idx] = make_t_from_effective(value);
         return *this;
     }
 
@@ -723,8 +985,9 @@ public:
     template<unsigned int idx>
     type &set()
     {
-        const unsigned int shift = idx * element_bits;
-        data_ |= (element_mask << shift);
+        pull();
+        push_first_ = true;
+        data_[idx] = ones;
         return *this;
     }
 
@@ -733,8 +996,9 @@ public:
      */
     type &set(unsigned int idx)
     {
-        const unsigned int shift = idx * element_bits;
-        data_ |= (element_mask << shift);
+        pull();
+        push_first_ = true;
+        data_[idx] = ones;
         return *this;
     }
 
@@ -744,8 +1008,9 @@ public:
     template<unsigned int idx>
     type &set_bits(bool v)
     {
-        const unsigned int shift = idx * element_bits;
-        data_ = (data_ & ~(element_mask << shift)) | ((v * element_mask) << shift);
+        pull();
+        push_first_ = true;
+        data_[idx] = v? ones: 0;
         return *this;
     }
 
@@ -754,20 +1019,25 @@ public:
      */
     type &set_bits(unsigned int idx, bool v)
     {
-        const unsigned int shift = idx * element_bits;
-        data_ = (data_ & ~(element_mask << shift)) | ((v * element_mask) << shift);
+        pull();
+        push_first_ = true;
+        data_[idx] = v? ones: 0;
         return *this;
     }
 
     /*
      * Sets all bits of element `idx` to 0
      */
+#if 0
     template<unsigned int idx>
     type &reset()
     {
+        pull();
+        push_first_ = true;
         data_ &= ~bitfield_member<T, idx * element_bits, element_bits>::bitfield_mask();
         return *this;
     }
+#endif
 
     /*
      * Sets all bits of element `idx` to 0
@@ -775,6 +1045,8 @@ public:
     type &reset(unsigned int idx)
     {
         const unsigned int shift = idx * element_bits;
+        pull();
+        push_first_ = true;
         data_ &= ~(element_mask << shift);
         return *this;
     }
@@ -782,12 +1054,16 @@ public:
     /*
      * Flips all bits of element `idx`
      */
+#if 0
     template<unsigned int idx>
     type &flip()
     {
+        pull();
+        push_first_ = true;
         data_ ^= bitfield_member<T, idx * element_bits, element_bits>::bitfield_mask();
         return *this;
     }
+#endif
 
     /*
      * Flips all bits of element `idx`
@@ -795,6 +1071,8 @@ public:
     type &flip(unsigned int idx)
     {
         const unsigned int shift = idx * element_bits;
+        pull();
+        push_first_ = true;
         data_ ^= (element_mask << shift);
         return *this;
     }
@@ -803,33 +1081,25 @@ public:
      * Gets value of element `idx`
      */
     template<unsigned int idx>
-    constexpr EffectiveType get() const
+    EffectiveType get()
     {
-        return make_effective_from_t((data_ >> (idx * element_bits)) & element_mask);
+        pull();
+        return make_effective_from_t(data_[idx]);
     }
 
     /*
      * Gets value of element `idx`
      */
-    constexpr EffectiveType get(unsigned int idx) const
+    EffectiveType get(unsigned int idx)
     {
-        return make_effective_from_t((data_ >> (idx * element_bits)) & element_mask);
+        pull();
+        return make_effective_from_t(data_[idx]);
     }
-
-    /*
-     * Returns minumum value of vector
-     */
-    static constexpr T min() {return 0;}
-
-    /*
-     * Returns maximum value of vector
-     */
-    static constexpr T max() {return mask;}
 
     /*
      * Returns unsigned mask that can contain all element values
      */
-    static constexpr T scalar_mask() {return element_mask;}
+    static constexpr underlying_element_type scalar_mask() {return element_mask;}
 
     /*
      * Returns the minimum value an element can contain
@@ -840,11 +1110,6 @@ public:
      * Returns the maximum value an element can contain
      */
     static constexpr EffectiveType scalar_max() {return elements_are_signed? make_effective_from_t(element_mask >> 1): make_effective_from_t(element_mask);}
-
-    /*
-     * Returns maximum value of vector
-     */
-    static constexpr T vector_mask() {return mask;}
 
     /*
      * Returns whether elements in this vector are viewed as signed values
@@ -870,7 +1135,8 @@ public:
     /* Reads vector from memory location (non-portable, so don't use for saving values permanently unless they're read with the same computing configuration) */
     type &load_packed(const underlying_vector_type *mem)
     {
-        data_ = *mem & mask;
+        for (unsigned i = 0; i < max_elements(); ++i)
+            data_[i] = *mem++ & element_mask;
         return *this;
     }
 
@@ -913,18 +1179,38 @@ public:
         return load_unpacked(array);
     }
 
-    /* Determines if aligned accesses are possible with specified pointer (does nothing with generic_simd_vector) */
+    /* Determines if aligned accesses are possible with specified pointer (does nothing with opencl_simd_vector) */
     static constexpr bool ptr_is_aligned(EffectiveType *)
     {
         return true;
     }
 
 private:
+    // Pushes from data to buffer if necessary
+    void push() const
+    {
+        if (push_first_)
+        {
+            interface().queue().enqueueWriteBuffer(buf_, CL_TRUE, 0, vector_digits / 8, data_.data());
+            push_first_ = false;
+        }
+    }
+
+    // Pushes from buffer to data if necessary
+    void pull()
+    {
+        if (pull_first_)
+        {
+            interface().queue().enqueueReadBuffer(buf_, CL_TRUE, 0, vector_digits / 8, data_.data());
+            pull_first_ = false;
+        }
+    }
+
     // Lambda should be a functor taking an EffectiveType and returning an EffectiveType value
     template<typename Lambda>
     type make_init_value(Lambda callable) const
     {
-        T result = 0;
+        type result;
         constexpr unsigned int shift = element_bits % vector_digits;
 
         for (unsigned i = 0; i < max_elements(); ++i)
@@ -933,11 +1219,23 @@ private:
         return type(result);
     }
 
+    // Lambda should be a functor taking an underlying_element_type and returning an underlying_element_type value
+    template<typename Lambda>
+    type make_init_raw_value(Lambda callable) const
+    {
+        type res;
+
+        for (unsigned i = 0; i < max_elements(); ++i)
+            res.data_[i] = callable(data_[i]);
+
+        return res;
+    }
+
     // Lambda should be a functor taking 2 EffectiveType values and returning an EffectiveType value
     template<typename Lambda>
-    type make_init_values(generic_simd_vector vec, Lambda callable) const
+    type make_init_values(opencl_simd_vector vec, Lambda callable) const
     {
-        T result = 0;
+        type result;
         constexpr unsigned int shift = element_bits % vector_digits;
 
         for (unsigned i = 0; i < max_elements(); ++i)
@@ -946,11 +1244,23 @@ private:
         return type(result);
     }
 
+    // Lambda should be a functor taking 2 underlying_element_type values and returning an underlying_element_type value
+    template<typename Lambda>
+    type make_init_raw_values(opencl_simd_vector vec, Lambda callable) const
+    {
+        type res;
+
+        for (unsigned i = 0; i < max_elements(); ++i)
+            res.data_[i] = callable(data_[i], vec.data_[i]);
+
+        return res;
+    }
+
     // Lambda should be a functor taking 2 EffectiveType values and returning a boolean value
     template<typename Lambda>
-    type make_init_cmp_values(generic_simd_vector vec, Lambda callable) const
+    type make_init_cmp_values(opencl_simd_vector vec, Lambda callable) const
     {
-        T result = 0;
+        type result;
         constexpr unsigned int shift = element_bits % vector_digits;
 
         for (unsigned i = 0; i < max_elements(); ++i)
@@ -959,40 +1269,34 @@ private:
         return type(result);
     }
 
-    static constexpr T expand_mask(T mask, unsigned int mask_size, unsigned int level)
-    {
-        return level == 0? mask:
-                           expand_mask(mask | ((mask & (ones >> (vector_digits - mask_size))) <<
-                                               ((level-1) * mask_size))
-                                       , mask_size
-                                       , level-1);
-    }
-    static constexpr T fill_elements_if_nonzero(T vector, unsigned int mask_size, unsigned int number_of_bits_to_merge)
-    {
-        return number_of_bits_to_merge == 0? (vector & expand_mask(1, mask_size, elements)) * element_mask:
-                           fill_elements_if_nonzero(((vector >> number_of_bits_to_merge/2) & expand_mask(element_mask >> number_of_bits_to_merge/2, mask_size, elements)) |
-                                                    (vector & expand_mask(element_mask >> number_of_bits_to_merge/2, mask_size, elements))
-                                                    , mask_size
-                                                    , number_of_bits_to_merge / 2);
-    }
-    constexpr EffectiveType horizontal_sum_helper(T vector, unsigned int level) const
-    {
-        return level == 0? EffectiveType(0): EffectiveType(type(vector).get(level-1) + horizontal_sum_helper(vector, level-1));
-    }
-
-    underlying_element_type data_[desired_elements];
+    std::array<underlying_element_type, desired_elements> data_;
+    mutable bool push_first_, pull_first_;
     underlying_vector_type buf_;
-    cl::Context ctx_;
 };
 
+#if 0
 template<typename T, unsigned int element_bits, typename EffectiveType>
-struct native_simd_vector : public generic_simd_vector<T, element_bits, EffectiveType>
+struct native_simd_vector : public opencl_simd_vector<T, element_bits, EffectiveType>
 {
     native_simd_vector() {}
-    native_simd_vector(generic_simd_vector<T, element_bits, EffectiveType> v)
-        : generic_simd_vector<T, element_bits, EffectiveType>(v)
+    native_simd_vector(opencl_simd_vector<T, element_bits, EffectiveType> v)
+        : opencl_simd_vector<T, element_bits, EffectiveType>(v)
     {}
 };
+#endif
+}
+
+template<unsigned int desired_elements, unsigned int bits, typename EffectiveType>
+std::ostream &operator<<(std::ostream &os, cppbits::opencl_simd_vector<desired_elements, bits, EffectiveType> vec)
+{
+    os.put('[');
+    for (unsigned i = 0; i < vec.max_elements(); ++i)
+    {
+        if (i != 0)
+            os.put(' ');
+        os << vec.get(i);
+    }
+    return os.put(']');
 }
 
 #endif // OPENCL_SIMD_H
