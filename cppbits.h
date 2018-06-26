@@ -27,13 +27,14 @@
 
 #include "simd/generic_simd.h"
 #include "simd/x86_simd.h"
+//#include "simd/opencl_simd.h"
 
 namespace cppbits {
-template<unsigned int desired_elements, typename T, unsigned int element_bits, typename EffectiveType>
+template<unsigned int desired_elements, template<typename, unsigned int, typename> class native_vector_type, typename T, unsigned int element_bits, typename EffectiveType>
 class simd_vector
 {
-    typedef native_simd_vector<T, element_bits, EffectiveType> native_vector;
-    typedef simd_vector<desired_elements, T, element_bits, EffectiveType> type;
+    typedef native_vector_type<T, element_bits, EffectiveType> native_vector;
+    typedef simd_vector<desired_elements, native_vector_type, T, element_bits, EffectiveType> type;
     static constexpr unsigned int native_vector_count = desired_elements? (desired_elements + native_vector::max_elements() - 1) / native_vector::max_elements(): 1;
 
 public:
@@ -42,9 +43,9 @@ public:
      * The data is not modified.
      */
     template<typename NewType>
-    simd_vector<desired_elements, T, element_bits, NewType> cast() const
+    simd_vector<desired_elements, native_vector_type, T, element_bits, NewType> cast() const
     {
-        simd_vector<desired_elements, T, element_bits, NewType> result;
+        simd_vector<desired_elements, native_vector_type, T, element_bits, NewType> result;
         for (unsigned i = 0; i < native_vector_count; ++i)
             result.array_[i] = array_[i].template cast<NewType>();
         return result;
@@ -56,9 +57,9 @@ public:
      * TODO: needs work. Changing element sizes across the entire vector is a tricky endeavor.
      */
     template<unsigned int element_size, typename NewType>
-    simd_vector<desired_elements, T, element_size, NewType> cast() const
+    simd_vector<desired_elements, native_vector_type, T, element_size, NewType> cast() const
     {
-        simd_vector<desired_elements, T, element_size, NewType> result;
+        simd_vector<desired_elements, native_vector_type, T, element_size, NewType> result;
         for (unsigned i = 0; i < std::min(native_vector_count, result.native_vector_count); ++i)
             result.array_[i] = array_[i].template cast<element_size, NewType>();
         return result;
@@ -676,14 +677,28 @@ private:
     native_vector array_[native_vector_count];
 };
 
-template<typename T>
-class vector2 : public simd_vector<2, uint64_t, sizeof(T) * CHAR_BIT, T>
+template<unsigned int desired_elements, typename T, unsigned int element_bits, typename EffectiveType>
+class default_simd_vector : public simd_vector<desired_elements, native_simd_vector, T, element_bits, EffectiveType>
 {
-    typedef simd_vector<2, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+    typedef simd_vector<desired_elements, native_simd_vector, T, element_bits, EffectiveType> type;
+
+public:
+    default_simd_vector() : type() {}
+    default_simd_vector(type v) : type(v) {}
+
+    default_simd_vector &operator=(type v) {type::operator=(v); return *this;}
+};
+
+template<typename T, template<typename, unsigned int, typename> class underlying_vector = native_simd_vector>
+class vector2 : public simd_vector<2, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T>
+{
+    typedef simd_vector<2, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T> type;
 
 public:
     vector2() : type() {}
     vector2(type v) : type(v) {}
+
+    vector2 &operator=(type v) {type::operator=(v); return *this;}
 };
 
 typedef vector2<int8_t> vector2x8;
@@ -697,14 +712,16 @@ typedef vector2<uint64_t> vector2xu64;
 typedef vector2<float> vector2f;
 typedef vector2<double> vector2d;
 
-template<typename T>
-class vector3 : public simd_vector<3, uint64_t, sizeof(T) * CHAR_BIT, T>
+template<typename T, template<typename, unsigned int, typename> class underlying_vector = native_simd_vector>
+class vector3 : public simd_vector<3, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T>
 {
-    typedef simd_vector<3, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+    typedef simd_vector<3, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T> type;
 
 public:
     vector3() : type() {}
     vector3(type v) : type(v) {}
+
+    vector3 &operator=(type v) {type::operator=(v); return *this;}
 };
 
 typedef vector3<int8_t> vector3x8;
@@ -718,14 +735,16 @@ typedef vector3<uint64_t> vector3xu64;
 typedef vector3<float> vector3f;
 typedef vector3<double> vector3d;
 
-template<typename T>
-class vector4 : public simd_vector<4, uint64_t, sizeof(T) * CHAR_BIT, T>
+template<typename T, template<typename, unsigned int, typename> class underlying_vector = native_simd_vector>
+class vector4 : public simd_vector<4, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T>
 {
-    typedef simd_vector<4, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+    typedef simd_vector<4, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T> type;
 
 public:
     vector4() : type() {}
     vector4(type v) : type(v) {}
+
+    vector4 &operator=(type v) {type::operator=(v); return *this;}
 };
 
 typedef vector4<int8_t> vector4x8;
@@ -739,14 +758,16 @@ typedef vector4<uint64_t> vector4xu64;
 typedef vector4<float> vector4f;
 typedef vector4<double> vector4d;
 
-template<typename T>
-class vector8 : public simd_vector<8, uint64_t, sizeof(T) * CHAR_BIT, T>
+template<typename T, template<typename, unsigned int, typename> class underlying_vector = native_simd_vector>
+class vector8 : public simd_vector<8, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T>
 {
-    typedef simd_vector<8, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+    typedef simd_vector<8, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T> type;
 
 public:
     vector8() : type() {}
     vector8(type v) : type(v) {}
+
+    vector8 &operator=(type v) {type::operator=(v); return *this;}
 };
 
 typedef vector8<int8_t> vector8x8;
@@ -760,14 +781,16 @@ typedef vector8<uint64_t> vector8xu64;
 typedef vector8<float> vector8f;
 typedef vector8<double> vector8d;
 
-template<typename T>
-class vector16 : public simd_vector<16, uint64_t, sizeof(T) * CHAR_BIT, T>
+template<typename T, template<typename, unsigned int, typename> class underlying_vector = native_simd_vector>
+class vector16 : public simd_vector<16, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T>
 {
-    typedef simd_vector<16, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+    typedef simd_vector<16, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T> type;
 
 public:
     vector16() : type() {}
     vector16(type v) : type(v) {}
+
+    vector16 &operator=(type v) {type::operator=(v); return *this;}
 };
 
 typedef vector16<int8_t> vector16x8;
@@ -781,14 +804,16 @@ typedef vector16<uint64_t> vector16xu64;
 typedef vector16<float> vector16f;
 typedef vector16<double> vector16d;
 
-template<typename T>
-class vector32 : public simd_vector<32, uint64_t, sizeof(T) * CHAR_BIT, T>
+template<typename T, template<typename, unsigned int, typename> class underlying_vector = native_simd_vector>
+class vector32 : public simd_vector<32, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T>
 {
-    typedef simd_vector<32, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+    typedef simd_vector<32, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T> type;
 
 public:
     vector32() : type() {}
     vector32(type v) : type(v) {}
+
+    vector32 &operator=(type v) {type::operator=(v); return *this;}
 };
 
 typedef vector32<int8_t> vector32x8;
@@ -802,14 +827,16 @@ typedef vector32<uint64_t> vector32xu64;
 typedef vector32<float> vector32f;
 typedef vector32<double> vector32d;
 
-template<typename T>
-class vector64 : public simd_vector<64, uint64_t, sizeof(T) * CHAR_BIT, T>
+template<typename T, template<typename, unsigned int, typename> class underlying_vector = native_simd_vector>
+class vector64 : public simd_vector<64, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T>
 {
-    typedef simd_vector<64, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+    typedef simd_vector<64, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T> type;
 
 public:
     vector64() : type() {}
     vector64(type v) : type(v) {}
+
+    vector64 &operator=(type v) {type::operator=(v); return *this;}
 };
 
 typedef vector64<int8_t> vector64x8;
@@ -823,14 +850,16 @@ typedef vector64<uint64_t> vector64xu64;
 typedef vector64<float> vector64f;
 typedef vector64<double> vector64d;
 
-template<typename T>
-class vector128 : public simd_vector<128, uint64_t, sizeof(T) * CHAR_BIT, T>
+template<typename T, template<typename, unsigned int, typename> class underlying_vector = native_simd_vector>
+class vector128 : public simd_vector<128, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T>
 {
-    typedef simd_vector<128, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+    typedef simd_vector<128, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T> type;
 
 public:
     vector128() : type() {}
     vector128(type v) : type(v) {}
+
+    vector128 &operator=(type v) {type::operator=(v); return *this;}
 };
 
 typedef vector128<int8_t> vector128x8;
@@ -844,14 +873,16 @@ typedef vector128<uint64_t> vector128xu64;
 typedef vector128<float> vector128f;
 typedef vector128<double> vector128d;
 
-template<typename T>
-class vector256 : public simd_vector<256, uint64_t, sizeof(T) * CHAR_BIT, T>
+template<typename T, template<typename, unsigned int, typename> class underlying_vector = native_simd_vector>
+class vector256 : public simd_vector<256, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T>
 {
-    typedef simd_vector<256, uint64_t, sizeof(T) * CHAR_BIT, T> type;
+    typedef simd_vector<256, underlying_vector, uint64_t, sizeof(T) * CHAR_BIT, T> type;
 
 public:
     vector256() : type() {}
     vector256(type v) : type(v) {}
+
+    vector256 &operator=(type v) {type::operator=(v); return *this;}
 };
 
 typedef vector256<int8_t> vector256x8;

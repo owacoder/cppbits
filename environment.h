@@ -91,6 +91,64 @@ private:
 
 namespace impl
 {
+    template<typename T, bool is_signed>
+    struct type_name {};
+    template<bool is_signed>
+    struct type_name<char, is_signed> {static constexpr const char *value = is_signed? "signed char": "unsigned char";};
+    template<bool is_signed>
+    struct type_name<signed char, is_signed> {static constexpr const char *value = is_signed? "signed char": "unsigned char";};
+    template<bool is_signed>
+    struct type_name<unsigned char, is_signed> {static constexpr const char *value = is_signed? "signed char": "unsigned char";};
+    template<bool is_signed>
+    struct type_name<signed short, is_signed> {static constexpr const char *value = is_signed? "signed short": "unsigned short";};
+    template<bool is_signed>
+    struct type_name<unsigned short, is_signed> {static constexpr const char *value = is_signed? "signed short": "unsigned short";};
+    template<bool is_signed>
+    struct type_name<signed int, is_signed> {static constexpr const char *value = is_signed? "signed int": "unsigned int";};
+    template<bool is_signed>
+    struct type_name<unsigned int, is_signed> {static constexpr const char *value = is_signed? "signed int": "unsigned int";};
+    template<bool is_signed>
+    struct type_name<signed long, is_signed> {static constexpr const char *value = is_signed? "signed long": "unsigned long";};
+    template<bool is_signed>
+    struct type_name<unsigned long, is_signed> {static constexpr const char *value = is_signed? "signed long": "unsigned long";};
+    template<bool is_signed>
+    struct type_name<signed long long, is_signed> {static constexpr const char *value = is_signed? "signed long long": "unsigned long long";};
+    template<bool is_signed>
+    struct type_name<unsigned long long, is_signed> {static constexpr const char *value = is_signed? "signed long long": "unsigned long long";};
+    template<bool is_signed>
+    struct type_name<float, is_signed> {static constexpr const char *value = "float";};
+    template<bool is_signed>
+    struct type_name<double, is_signed> {static constexpr const char *value = "double";};
+
+    template<typename T, bool is_signed>
+    struct double_type_name {};
+    template<bool is_signed>
+    struct double_type_name<char, is_signed> {static constexpr const char *value = is_signed? "signed short": "unsigned short";};
+    template<bool is_signed>
+    struct double_type_name<signed char, is_signed> {static constexpr const char *value = is_signed? "signed short": "unsigned short";};
+    template<bool is_signed>
+    struct double_type_name<unsigned char, is_signed> {static constexpr const char *value = is_signed? "signed short": "unsigned short";};
+    template<bool is_signed>
+    struct double_type_name<signed short, is_signed> {static constexpr const char *value = is_signed? "signed int": "unsigned int";};
+    template<bool is_signed>
+    struct double_type_name<unsigned short, is_signed> {static constexpr const char *value = is_signed? "signed int": "unsigned int";};
+    template<bool is_signed>
+    struct double_type_name<signed int, is_signed> {static constexpr const char *value = is_signed? "signed long": "unsigned long";};
+    template<bool is_signed>
+    struct double_type_name<unsigned int, is_signed> {static constexpr const char *value = is_signed? "signed long": "unsigned long";};
+    template<bool is_signed>
+    struct double_type_name<signed long, is_signed> {static constexpr const char *value = is_signed? "signed long long": "unsigned long long";};
+    template<bool is_signed>
+    struct double_type_name<unsigned long, is_signed> {static constexpr const char *value = is_signed? "signed long long": "unsigned long long";};
+    template<bool is_signed>
+    struct double_type_name<signed long long, is_signed> {static constexpr const char *value = is_signed? "signed long long": "unsigned long long";};
+    template<bool is_signed>
+    struct double_type_name<unsigned long long, is_signed> {static constexpr const char *value = is_signed? "signed long long": "unsigned long long";};
+    template<bool is_signed>
+    struct double_type_name<float, is_signed> {static constexpr const char *value = "float";};
+    template<bool is_signed>
+    struct double_type_name<double, is_signed> {static constexpr const char *value = "double";};
+
     template<unsigned int size>
     struct unsigned_int {};
     template<>
@@ -152,6 +210,32 @@ namespace cppbits
         compare_greaterequal, /* Compare `a >= b` */
         compare_equal, /* Compare `a == b` */
         compare_nequal /* Compare `a != b` */
+    };
+
+    enum shuffle_type
+    {
+        shuffle_0_same = 0x0, /* Keep element 0 */
+        shuffle_1_to_0 = 0x1, /* Shuffle element 1 to element 0 */
+        shuffle_2_to_0 = 0x2, /* Shuffle element 2 to element 0 */
+        shuffle_3_to_0 = 0x3, /* Shuffle element 3 to element 0 */
+        shuffle_0_to_1 = 0x0 << 2, /* Shuffle element 0 to element 1 */
+        shuffle_1_same = 0x1 << 2, /* Keep element 1 */
+        shuffle_2_to_1 = 0x2 << 2, /* Shuffle element 2 to element 1 */
+        shuffle_3_to_1 = 0x3 << 2, /* Shuffle element 3 to element 1 */
+        shuffle_0_to_2 = 0x0 << 4, /* Shuffle element 0 to element 2 */
+        shuffle_1_to_2 = 0x1 << 4, /* Shuffle element 1 to element 2 */
+        shuffle_2_same = 0x2 << 4, /* Keep element 2 */
+        shuffle_3_to_2 = 0x3 << 4, /* Shuffle element 3 to element 2 */
+        shuffle_0_to_3 = 0x0 << 6, /* Shuffle element 0 to element 3 */
+        shuffle_1_to_3 = 0x1 << 6, /* Shuffle element 1 to element 3 */
+        shuffle_2_to_3 = 0x2 << 6, /* Shuffle element 2 to element 3 */
+        shuffle_3_same = 0x3 << 6, /* Shuffle element 3 to element 3 */
+
+        shuffle_same = shuffle_0_same | shuffle_1_same | shuffle_2_same | shuffle_3_same, /* Keep all elements identical */
+        shuffle_broadcast_0 = shuffle_0_same | shuffle_0_to_1 | shuffle_0_to_2 | shuffle_0_to_3, /* Broadcast element 0 to all elements */
+        shuffle_broadcast_1 = shuffle_1_to_0 | shuffle_1_same | shuffle_1_to_2 | shuffle_1_to_3, /* Broadcast element 1 to all elements */
+        shuffle_broadcast_2 = shuffle_2_to_0 | shuffle_2_to_1 | shuffle_2_same | shuffle_2_to_3, /* Broadcast element 2 to all elements */
+        shuffle_broadcast_3 = shuffle_3_to_0 | shuffle_3_to_1 | shuffle_3_to_2 | shuffle_3_same /* Broadcast element 3 to all elements */
     };
 }
 
