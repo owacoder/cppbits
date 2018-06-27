@@ -77,16 +77,16 @@
 
 struct simd_error
 {
-    simd_error(const char *what) : what_(what) {}
+    simd_error(std::string what) : what_(what) {}
 
-    const char *what() const {return what_;}
+    const char *what() const {return what_.c_str();}
     friend std::ostream &operator<<(std::ostream &os, simd_error e)
     {
         return os << "cppbits: " << e.what();
     }
 
 private:
-    const char *what_;
+    std::string what_;
 };
 
 namespace impl

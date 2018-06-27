@@ -26,6 +26,7 @@
 #define OPENCL_SIMD_H
 
 #include "../environment.h"
+#define __CL_ENABLE_EXCEPTIONS
 #include "CL/cl.hpp"
 
 #include <array>
@@ -53,172 +54,232 @@ public:
 private:
     void init()
     {
-        cl::Platform platform;
-        std::vector<cl::Device> devices;
-
-        platform.getDevices(CL_DEVICE_TYPE_ALL, &devices);
-
-        ctx_ = cl::Context(devices);
-        std::string source;
-
-        if (is_floating_point)
+        try
         {
-            // TODO: compares should result in all bits set to 1
+#if 0
+            std::vector<cl::Platform> platforms;
+            cl::Platform::get(&platforms);
 
-            source = "__kernel void add(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
-                    ""
-                    "__kernel void add_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
-                    ""
-                    "__kernel void add_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
-                    ""
-                    "__kernel void add_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
-                    ""
-                    "__kernel void add_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
-                    ""
-                    "__kernel void sub(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
-                    ""
-                    "__kernel void sub_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
-                    ""
-                    "__kernel void sub_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
-                    ""
-                    "__kernel void sub_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
-                    ""
-                    "__kernel void sub_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
-                    ""
-                    "__kernel void mul(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] * B[i];}\n\n"
-                    ""
-                    "__kernel void div(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] / B[i];}\n\n"
-                    ""
-                    "__kernel void shl(__global const T *A, unsigned int B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] * pow(2.0, B);}\n\n"
-                    ""
-                    "__kernel void shr(__global const T *A, unsigned int B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] / pow(2.0, B);}\n\n"
-                    ""
-                    "__kernel void negate(__global const T *A, __global T *B)\n"
-                    "{size_t i = get_global_id(0); B[i] = -A[i];}\n\n"
-                    ""
-                    "__kernel void absolute(__global const T *A, __global T *B)\n"
-                    "{size_t i = get_global_id(0); B[i] = abs(A[i]);}\n\n"
-                    ""
-                    "__kernel void avg(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = (A[i] + B[i]) / 2.0;}\n\n"
-                    ""
-                    "__kernel void eq(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] == B[i]? -1: 0;}\n\n"
-                    ""
-                    "__kernel void ne(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] != B[i]? -1: 0;}\n\n"
-                    ""
-                    "__kernel void lt(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] < B[i]? -1: 0;}\n\n"
-                    ""
-                    "__kernel void gt(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] > B[i]? -1: 0;}\n\n"
-                    ""
-                    "__kernel void le(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] <= B[i]? -1: 0;}\n\n"
-                    ""
-                    "__kernel void ge(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] >= B[i]? -1: 0;}\n\n";
+            for (size_t i = 0; i < platforms.size(); ++i)
+            {
+                std::string s;
+                platforms[i].getInfo(CL_PLATFORM_NAME, &s);
+                std::cout << s << " (";
+                platforms[i].getInfo(CL_PLATFORM_VERSION, &s);
+                std::cout << s << ", ";
+                platforms[i].getInfo(CL_PLATFORM_VENDOR, &s);
+                std::cout << s << ')' << std::endl;
+            }
+#endif
+
+            cl::Platform platform;
+            std::vector<cl::Device> devices;
+
+            platform.getDevices(CL_DEVICE_TYPE_ALL, &devices);
+
+#if 0
+            for (size_t i = 0; i < devices.size(); ++i)
+            {
+                std::string s;
+                devices[i].getInfo(CL_DEVICE_NAME, &s);
+                int n;
+                devices[i].getInfo(CL_DEVICE_MAX_COMPUTE_UNITS, &n);
+                std::cout << s << " (" << n << " cores)" << std::endl;
+            }
+#endif
+
+            ctx_ = cl::Context(devices);
+            std::string source;
+
+            if (is_floating_point)
+            {
+                // TODO: compares should result in all bits set to 1
+
+                source = "#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n"
+                         "#pragma OPENCL EXTENSION cl_amd_fp64 : enable\n"
+                         ""
+                         "__kernel void add(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                        ""
+                        "__kernel void add_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                        ""
+                        "__kernel void add_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                        ""
+                        "__kernel void add_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                        ""
+                        "__kernel void add_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                        ""
+                        "__kernel void sub(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                        ""
+                        "__kernel void sub_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                        ""
+                        "__kernel void sub_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                        ""
+                        "__kernel void sub_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                        ""
+                        "__kernel void sub_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                        ""
+                        "__kernel void mul(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] * B[i];}\n\n"
+                        ""
+                        "__kernel void div(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] / B[i];}\n\n"
+                        ""
+                        "__kernel void shl(__global const T *A, unsigned int B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] * pow(2.0, (T) B);}\n\n"
+                        ""
+                        "__kernel void shr(__global const T *A, unsigned int B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] / pow(2.0, (T) B);}\n\n"
+                        ""
+                        "__kernel void negate(__global const T *A, __global T *B)\n"
+                        "{size_t i = get_global_id(0); B[i] = -A[i];}\n\n"
+                        ""
+                        "__kernel void absolute(__global const T *A, __global T *B)\n"
+                        "{size_t i = get_global_id(0); B[i] = fabs(A[i]);}\n\n"
+                        ""
+                        "__kernel void avg(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = (A[i] + B[i]) / 2.0;}\n\n"
+                        ""
+                        "__kernel void eq(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] == B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void ne(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] != B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void lt(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] < B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void gt(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] > B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void le(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] <= B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void ge(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] >= B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void recip(__global const T *A, __global T *B)\n"
+                        "{size_t i = get_global_id(0); B[i] = 1.0 / A[i];}\n\n"
+                        ""
+                        "__kernel void square_root(__global const T *A, __global T *B)\n"
+                        "{size_t i = get_global_id(0); B[i] = sqrt(A[i]);}\n\n";
+            }
+            else
+            {
+                // TODO: signed saturation
+                // TODO: signed hi part
+
+                source = "#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n"
+                         "#pragma OPENCL EXTENSION cl_amd_fp64 : enable\n"
+                        ""
+                        "__kernel void add(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                        ""
+                        "__kernel void add_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                        ""
+                        "__kernel void add_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); T temp = A[i] + B[i]; C[i] = temp < A[i];}\n\n"
+                        ""
+                        "__kernel void add_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
+                        ""
+                        "__kernel void add_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); T temp = A[i] + B[i]; C[i] = temp < A[i]? -1: temp;}\n\n"
+                        ""
+                        "__kernel void sub(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                        ""
+                        "__kernel void sub_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                        ""
+                        "__kernel void sub_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); T temp = A[i] - B[i]; C[i] = temp > A[i];}\n\n"
+                        ""
+                        "__kernel void sub_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
+                        ""
+                        "__kernel void sub_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); T temp = A[i] - B[i]; C[i] = temp > A[i]? 0: temp;}\n\n"
+                        ""
+                        "__kernel void mul(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] * B[i];}\n\n"
+                        ""
+                        "__kernel void div(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] / B[i];}\n\n"
+                        ""
+                        "__kernel void shl(__global const T *A, unsigned int B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] << B;}\n\n"
+                        ""
+                        "__kernel void shr(__global const T *A, unsigned int B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] >> B;}\n\n"
+                        ""
+                        "__kernel void negate(__global const T *A, __global T *B)\n"
+                        "{size_t i = get_global_id(0); B[i] = -A[i];}\n\n"
+                        ""
+                        "__kernel void absolute(__global const T *A, __global T *B)\n"
+                        "{size_t i = get_global_id(0); B[i] = abs(A[i]);}\n\n"
+                        ""
+                        "__kernel void avg(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = (A[i] + B[i] + 1) / 2;}\n\n"
+                        ""
+                        "__kernel void eq(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] == B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void ne(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] != B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void lt(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] < B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void gt(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] > B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void le(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] <= B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void ge(__global const T *A, __global const T *B, __global T *C)\n"
+                        "{size_t i = get_global_id(0); C[i] = A[i] >= B[i]? -1: 0;}\n\n"
+                        ""
+                        "__kernel void recip(__global const T *A, __global T *B)\n"
+                        "{size_t i = get_global_id(0); B[i] = A[i];}\n\n"
+                        ""
+                        "__kernel void square_root(__global const T *A, __global T *B)\n"
+                        "{size_t i = get_global_id(0); B[i] = A[i];}\n\n";
+            }
+
+            for (size_t i = 0; i = source.find('T', i), i != source.npos;)
+                source.replace(i, 1, type);
+
+            for (size_t i = 0; i = source.find('X', i), i != source.npos;)
+                source.replace(i, 1, double_type);
+
+            prog_ = cl::Program(ctx_, source, true);
+            prog_.createKernels(&kernels_);
+
+#if 0
+            std::cout << "compiled kernels for " << type << std::endl;
+            for (size_t i = 0; i < kernels_.size(); ++i)
+            {
+                std::string s;
+                kernels_[i].getInfo(CL_KERNEL_FUNCTION_NAME, &s);
+                std::cout << s << std::endl;
+            }
+#endif
+
+            queue_ = cl::CommandQueue(ctx_);
+        } catch (...) {
+            throw simd_error("OpenCL failed to compile kernels for '" + std::string(type) + "'");
         }
-        else
-        {
-            // TODO: signed saturation
-            // TODO: signed hi part
-
-            source = "__kernel void add(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
-                    ""
-                    "__kernel void add_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
-                    ""
-                    "__kernel void add_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); T temp = A[i] + B[i]; C[i] = temp < A[i];}\n\n"
-                    ""
-                    "__kernel void add_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] + B[i];}\n\n"
-                    ""
-                    "__kernel void add_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); T temp = A[i] + B[i]; C[i] = temp < A[i]? -1: temp;}\n\n"
-                    ""
-                    "__kernel void sub(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
-                    ""
-                    "__kernel void sub_hi_signed(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
-                    ""
-                    "__kernel void sub_hi_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); T temp = A[i] - B[i]; C[i] = temp > A[i];}\n\n"
-                    ""
-                    "__kernel void sub_saturate_signed(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] - B[i];}\n\n"
-                    ""
-                    "__kernel void sub_saturate_unsigned(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); T temp = A[i] - B[i]; C[i] = temp > A[i]? 0: temp;}\n\n"
-                    ""
-                    "__kernel void mul(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] * B[i];}\n\n"
-                    ""
-                    "__kernel void div(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] / B[i];}\n\n"
-                    ""
-                    "__kernel void shl(__global const T *A, unsigned int B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] << B;}\n\n"
-                    ""
-                    "__kernel void shr(__global const T *A, unsigned int B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] >> B;}\n\n"
-                    ""
-                    "__kernel void negate(__global const T *A, __global T *B)\n"
-                    "{size_t i = get_global_id(0); B[i] = -A[i];}\n\n"
-                    ""
-                    "__kernel void absolute(__global const T *A, __global T *B)\n"
-                    "{size_t i = get_global_id(0); B[i] = abs(A[i]);}\n\n"
-                    ""
-                    "__kernel void avg(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = (A[i] + B[i] + 1) / 2;}\n\n"
-                    ""
-                    "__kernel void eq(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] == B[i]? -1: 0;}\n\n"
-                    ""
-                    "__kernel void ne(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] != B[i]? -1: 0;}\n\n"
-                    ""
-                    "__kernel void lt(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] < B[i]? -1: 0;}\n\n"
-                    ""
-                    "__kernel void gt(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] > B[i]? -1: 0;}\n\n"
-                    ""
-                    "__kernel void le(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] <= B[i]? -1: 0;}\n\n"
-                    ""
-                    "__kernel void ge(__global const T *A, __global const T *B, __global T *C)\n"
-                    "{size_t i = get_global_id(0); C[i] = A[i] >= B[i]? -1: 0;}\n\n";
-        }
-
-        for (size_t i = 0; i = source.find('T', i), i != source.npos;)
-            source.replace(i, 1, type);
-
-        for (size_t i = 0; i = source.find('X', i), i != source.npos;)
-            source.replace(i, 1, double_type);
-
-        prog_ = cl::Program(ctx_, source, true);
-        prog_.createKernels(&kernels_);
-
-        queue_ = cl::CommandQueue(ctx_);
     }
 };
 
@@ -261,8 +322,10 @@ private:
         kernel_mul,
         kernel_ne,
         kernel_neg,
+        kernel_recip,
         kernel_shl,
         kernel_shr,
+        kernel_square_root,
         kernel_sub,
         kernel_sub_hi_signed,
         kernel_sub_hi_unsigned,
@@ -299,9 +362,10 @@ private:
     }
 
     static constexpr unsigned int buf_size = (((vector_digits / 8) >> 5) + 1) << 5;
+    static constexpr unsigned int local_work_group_size = 32;
 
     /*
-     *  Special constructor for output of operations
+     * Special constructor for output of operations
      */
     constexpr opencl_simd_vector(bool)
         : data_{}
@@ -486,7 +550,7 @@ public:
         ref->setArg(1, vec.buf_);
         ref->setArg(2, result.buf_);
 
-        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(local_work_group_size));
 
         return result;
     }
@@ -524,7 +588,7 @@ public:
         ref->setArg(1, vec.buf_);
         ref->setArg(2, result.buf_);
 
-        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(local_work_group_size));
 
         return result;
     }
@@ -562,7 +626,7 @@ public:
         ref->setArg(1, vec.buf_);
         ref->setArg(2, result.buf_);
 
-        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(local_work_group_size));
 
         return result;
     }
@@ -618,7 +682,7 @@ public:
         ref->setArg(1, vec.buf_);
         ref->setArg(2, result.buf_);
 
-        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(local_work_group_size));
 
         return result;
     }
@@ -641,7 +705,7 @@ public:
         ref->setArg(1, vec.buf_);
         ref->setArg(2, result.buf_);
 
-        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(local_work_group_size));
 
         return result;
     }
@@ -671,7 +735,7 @@ public:
         ref->setArg(1, amount);
         ref->setArg(2, result.buf_);
 
-        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(local_work_group_size));
 
         return result;
     }
@@ -754,7 +818,7 @@ public:
         ref->setArg(0, buf_);
         ref->setArg(1, result.buf_);
 
-        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(local_work_group_size));
 
         return result;
     }
@@ -777,7 +841,7 @@ public:
         ref->setArg(0, buf_);
         ref->setArg(1, result.buf_);
 
-        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(local_work_group_size));
 
         return result;
     }
@@ -877,7 +941,7 @@ public:
         ref->setArg(1, vec.buf_);
         ref->setArg(2, result.buf_);
 
-        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(32));
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(local_work_group_size));
 
         return result;
     }
@@ -895,13 +959,24 @@ public:
      */
     type reciprocal(cppbits::math_type) const
     {
-        if (elements_are_floats)
-            return make_init_value([](EffectiveType a) {return 1.0 / a;});
-        else
+        if (!elements_are_floats)
         {
             CPPBITS_ERROR("Reciprocal requested for integral vector");
             return *this;
         }
+
+        type result(true);
+
+        push();
+
+        cl::Kernel *ref = &interface().kernel(kernel_recip);
+
+        ref->setArg(0, buf_);
+        ref->setArg(1, result.buf_);
+
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(local_work_group_size));
+
+        return result;
     }
 
     /*
@@ -910,13 +985,24 @@ public:
      */
     type sqrt(cppbits::math_type) const
     {
-        if (elements_are_floats)
-            return make_init_value([](EffectiveType a) {return std::sqrt(a);});
-        else
+        if (!elements_are_floats)
         {
             CPPBITS_ERROR("Square-root requested for integral vector");
             return *this;
         }
+
+        type result(true);
+
+        push();
+
+        cl::Kernel *ref = &interface().kernel(kernel_square_root);
+
+        ref->setArg(0, buf_);
+        ref->setArg(1, result.buf_);
+
+        interface().queue().enqueueNDRangeKernel(*ref, cl::NullRange, cl::NDRange(buf_size), cl::NDRange(local_work_group_size));
+
+        return result;
     }
 
     /*
@@ -1127,16 +1213,19 @@ public:
     static constexpr unsigned int element_size() {return element_bits;}
 
     /* Dumps vector to memory location (non-portable, so don't use for saving values permanently unless they're read with the same computing configuration) */
-    void dump_packed(underlying_vector_type *mem)
+    void dump_packed(underlying_element_type *mem)
     {
-        *mem = data_;
+        pull();
+        for (unsigned i = 0; i < max_elements(); ++i)
+            *mem++ = data_[i];
     }
 
     /* Reads vector from memory location (non-portable, so don't use for saving values permanently unless they're read with the same computing configuration) */
-    type &load_packed(const underlying_vector_type *mem)
+    type &load_packed(const underlying_element_type *mem)
     {
+        push_first_ = true;
         for (unsigned i = 0; i < max_elements(); ++i)
-            data_[i] = *mem++ & element_mask;
+            data_[i] = *mem++;
         return *this;
     }
 
@@ -1146,8 +1235,9 @@ public:
      */
     void dump_unpacked(EffectiveType *array)
     {
+        pull();
         for (unsigned i = 0; i < max_elements(); ++i)
-            *array++ = get(i);
+            *array++ = make_effective_from_t(data_[i]);
     }
 
     /* Loads vector from array (with an identical number of elements to this vector) of EffectiveType values
@@ -1156,8 +1246,9 @@ public:
      */
     type &load_unpacked(const EffectiveType *array)
     {
+        push_first_ = true;
         for (unsigned i = 0; i < max_elements(); ++i)
-            set(i, *array++);
+            data_[i] = make_t_from_effective(*array++);
         return *this;
     }
 
@@ -1204,69 +1295,6 @@ private:
             interface().queue().enqueueReadBuffer(buf_, CL_TRUE, 0, vector_digits / 8, data_.data());
             pull_first_ = false;
         }
-    }
-
-    // Lambda should be a functor taking an EffectiveType and returning an EffectiveType value
-    template<typename Lambda>
-    type make_init_value(Lambda callable) const
-    {
-        type result;
-        constexpr unsigned int shift = element_bits % vector_digits;
-
-        for (unsigned i = 0; i < max_elements(); ++i)
-            result |= (make_t_from_effective(callable(get(i))) & element_mask) << (i * shift);
-
-        return type(result);
-    }
-
-    // Lambda should be a functor taking an underlying_element_type and returning an underlying_element_type value
-    template<typename Lambda>
-    type make_init_raw_value(Lambda callable) const
-    {
-        type res;
-
-        for (unsigned i = 0; i < max_elements(); ++i)
-            res.data_[i] = callable(data_[i]);
-
-        return res;
-    }
-
-    // Lambda should be a functor taking 2 EffectiveType values and returning an EffectiveType value
-    template<typename Lambda>
-    type make_init_values(opencl_simd_vector vec, Lambda callable) const
-    {
-        type result;
-        constexpr unsigned int shift = element_bits % vector_digits;
-
-        for (unsigned i = 0; i < max_elements(); ++i)
-            result |= (make_t_from_effective(callable(get(i), vec.get(i))) & element_mask) << (i * shift);
-
-        return type(result);
-    }
-
-    // Lambda should be a functor taking 2 underlying_element_type values and returning an underlying_element_type value
-    template<typename Lambda>
-    type make_init_raw_values(opencl_simd_vector vec, Lambda callable) const
-    {
-        type res;
-
-        for (unsigned i = 0; i < max_elements(); ++i)
-            res.data_[i] = callable(data_[i], vec.data_[i]);
-
-        return res;
-    }
-
-    // Lambda should be a functor taking 2 EffectiveType values and returning a boolean value
-    template<typename Lambda>
-    type make_init_cmp_values(opencl_simd_vector vec, Lambda callable) const
-    {
-        type result;
-        constexpr unsigned int shift = element_bits % vector_digits;
-
-        for (unsigned i = 0; i < max_elements(); ++i)
-            result |= (callable(get(i), vec.get(i)) * element_mask) << (i * shift);
-
-        return type(result);
     }
 
     std::array<underlying_element_type, desired_elements> data_;
